@@ -6,7 +6,8 @@
 
 - `mir-cli auth login` opens a browser-based Miraivfx / Logto authorization flow with PKCE.
 - The user enters credentials only in the browser.
-- The CLI requires a dedicated Logto application id through `MIRAIVFX_LOGTO_APP_ID` or `MIRAIVFX_AUTH_CLIENT_ID`.
+- The CLI defaults to the dedicated `Miraivfx MIR CLI` Logto single-page app id `kdj75szqjfbqcn6pzbtzu`.
+- Deployments can override the application id through `MIRAIVFX_LOGTO_APP_ID` or `MIRAIVFX_AUTH_CLIENT_ID`.
 - The CLI must not silently reuse the website Logto application id.
 - The CLI stores local authorization data under the user's home directory as a first implementation. A system keychain backend should replace this before broad distribution.
 - Agent tools must never receive passwords or raw tokens.
