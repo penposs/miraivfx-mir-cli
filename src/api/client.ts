@@ -31,6 +31,21 @@ export class ApiClient {
     return (await response.json()) as T;
   }
 
+  async putJson<T>(path: string, body: unknown): Promise<T> {
+    const response = await fetch(`${this.options.baseUrl}${path}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...this.headers(),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: HTTP ${response.status}`);
+    }
+    return (await response.json()) as T;
+  }
+
   async postForm<T>(path: string, form: FormData): Promise<T> {
     const response = await fetch(`${this.options.baseUrl}${path}`, {
       method: "POST",

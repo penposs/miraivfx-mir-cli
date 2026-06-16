@@ -1,4 +1,5 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { getFlagValue, hasFlag } from "../core/args.js";
 import { ApiClient } from "../api/client.js";
@@ -117,6 +118,18 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
     return;
   }
 
+  if (subcommand === "node") {
+    const action = args[0] ?? "";
+    const rest = args.slice(1);
+    if (action === "add-image") {
+      const result = await addImageNode(api, rest);
+      asJson ? json(result) : text(`Added image node ${result.node_id} to ${result.canvas_id}`);
+      return;
+    }
+    text("Usage: mir-cli canvas node <add-image>");
+    return;
+  }
+
   if (["plan", "deploy", "run"].includes(subcommand)) {
     const payload = {
       ok: false,
@@ -127,7 +140,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
     return;
   }
 
-  text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|plan|deploy|run|status|download>");
+  text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|node|plan|deploy|run|status|download>");
 }
 
 async function listAllCanvases(api: ApiClient): Promise<{ canvases: CanvasListItem[] }> {
@@ -208,6 +221,88 @@ function summarizeCanvas(canvas: CanvasData): Record<string, unknown> {
   };
 }
 
+async function addImageNode(api: ApiClient, args: string[]): Promise<Record<string, unknown>> {
+  if (!hasFlag(args, "--yes")) {
+    throw new Error("Creating a canvas node requires explicit --yes");
+  }
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const prompt = getFlagValue(args, "--prompt") ?? "";
+  const model = getFlagValue(args, "--model");
+  const title = getFlagValue(args, "--title") ?? "AI 生图";
+  const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x") ?? 0;
+  const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y") ?? 0;
+  const settings = parseSettings(getFlagValue(args, "--settings-json"));
+
+  if (model) {
+    await assertModelAvailable(api, "image", model);
+  }
+
+  const response = await api.getJson<GetCanvasResponse>(`/canvas/${encodeURIComponent(canvasId)}`);
+  if (!response.success || !response.data) {
+    throw new Error(response.error ?? "Canvas not found");
+  }
+  const canvas = response.data;
+  const now = Date.now();
+  const node: CanvasNodeRecord = {
+    id: randomUUID(),
+    x,
+    y,
+    width: 600,
+    height: 360,
+    type: "image",
+    content: prompt,
+    title,
+    data: {
+      ...(settings ?? {}),
+      ...(settings ? { settings } : {}),
+      ...(prompt ? { prompt } : {}),
+      ...(model ? { model } : {}),
+      createdBy: "mir-cli",
+      createdAt: new Date(now).toISOString(),
+    },
+    status: "idle",
+  };
+
+  const update = await api.putJson<UpdateCanvasResponse>(`/canvas/${encodeURIComponent(canvas.id)}`, {
+    nodes: [...(canvas.nodes ?? []), node],
+    connections: canvas.connections ?? [],
+    clientHydrated: true,
+    clientModifiedAt: now,
+  });
+
+  if (!update.success) {
+    throw new Error(update.error ?? "Failed to update canvas");
+  }
+  if (update.data?.ignored) {
+    throw new Error("Canvas update was ignored because the server has a newer version. Re-inspect the canvas and retry.");
+  }
+
+  return {
+    ok: true,
+    canvas_id: canvas.id,
+    project_id: canvas.project_id,
+    node_id: node.id,
+    node_type: node.type,
+    prompt,
+    model: model ?? null,
+    revision: update.data?.revision,
+    clientModifiedAt: update.data?.clientModifiedAt,
+    generation_started: false,
+  };
+}
+
+async function assertModelAvailable(api: ApiClient, task: string, modelId: string): Promise<void> {
+  const response = await api.getJson<ModelsResponse>(`/canvas/models?task=${encodeURIComponent(task)}`);
+  const models = normalizeModels(response, task);
+  const match = models.find((model) => model.model_id === modelId);
+  if (!match) {
+    throw new Error(`Model is not available for ${task}: ${modelId}`);
+  }
+  if (match.enabled === false || match.maintenance === true) {
+    throw new Error(`Model is not currently usable: ${modelId}`);
+  }
+}
+
 function normalizeModels(response: ModelsResponse, task: string): Array<Record<string, unknown>> {
   const rows: Array<any> = [];
   if (Array.isArray(response.data)) {
@@ -248,6 +343,22 @@ function formatCanvasList(canvases: CanvasListItem[]): string {
 function requireValue(value: string | undefined, flag: string): string {
   if (!value) throw new Error(`Missing ${flag}`);
   return value;
+}
+
+function parseOptionalNumber(value: string | undefined, flag: string): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`Invalid ${flag}`);
+  return parsed;
+}
+
+function parseSettings(value: string | undefined): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  const parsed = JSON.parse(value) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("--settings-json must be a JSON object");
+  }
+  return parsed as Record<string, unknown>;
 }
 
 interface ProjectListResponse {
@@ -294,6 +405,31 @@ interface CanvasData {
   revision?: number;
   clientModifiedAt?: number;
   updatedAt?: number;
+}
+
+interface CanvasNodeRecord {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  type: "image";
+  content: string;
+  title?: string;
+  data: Record<string, unknown>;
+  status: "idle";
+}
+
+interface UpdateCanvasResponse {
+  success: boolean;
+  data?: {
+    revision?: number;
+    updatedAt?: number;
+    clientModifiedAt?: number;
+    ignored?: boolean;
+    name?: string;
+  };
+  error?: string;
 }
 
 interface CanvasListItem {

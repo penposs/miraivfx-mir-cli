@@ -13,6 +13,10 @@ Usage:
   mir-cli canvas capabilities --json
   mir-cli canvas models --task image --json
   mir-cli canvas inspect --canvas-id <canvas_id> --summary
+  mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "Prompt" --model <model_id> --yes --json
+  mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
+  mir-cli canvas status --task-id <task_id> --json
+  mir-cli canvas download --task-id <task_id> --out ./downloads
 
-This scaffold contains command contracts. API-backed behavior is implemented next.`);
+Canvas node commands write saved canvas JSON only. They do not start generation unless a command explicitly says so and requires --allow-generation.`);
 }

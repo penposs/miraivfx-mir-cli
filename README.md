@@ -27,6 +27,7 @@ mir-cli canvas open --canvas-id <canvas_id>
 mir-cli canvas capabilities --json
 mir-cli canvas models --task image --json
 mir-cli canvas inspect --canvas-id <canvas_id> --summary
+mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --json
 mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
 mir-cli canvas status --task-id <task_id> --json
 mir-cli canvas download --task-id <task_id> --out ./downloads
@@ -63,4 +64,4 @@ mir-cli canvas inspect --canvas-id <canvas_id> --json
 
 ## Repository Status
 
-This repository contains the first API-backed CLI implementation. Generation and canvas mutation commands remain gated behind explicit future work.
+This repository contains the first API-backed CLI implementation. Safe canvas node creation is available behind explicit confirmation; generation submission remains gated behind future `--allow-generation` work.

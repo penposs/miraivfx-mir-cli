@@ -29,6 +29,15 @@ mir-cli canvas inspect --canvas-id <canvas_id> --summary
 mir-cli canvas inspect --canvas-id <canvas_id> --json
 ```
 
+## Canvas Node Mutations
+
+```powershell
+mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --json
+mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --settings-json "{\"size\":\"1024x1024\"}" --yes --json
+```
+
+`canvas node add-image` creates a saved `image` generation node using the existing Miraivfx canvas schema. It checks the selected model against `/api/canvas/models?task=image`, writes the node with `status=idle`, and does not start generation.
+
 ## Capabilities And Models
 
 ```powershell
