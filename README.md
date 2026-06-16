@@ -35,12 +35,14 @@ mir-cli canvas download --task-id <task_id> --out ./downloads
 During the first API integration phase, configure local API settings with environment variables:
 
 ```powershell
-$env:MIRAIVFX_API_BASE = "https://miraivfx.com/api"
-$env:MIRAIVFX_APP_BASE = "https://miraivfx.com"
-$env:MIRAIVFX_TOKEN = "<local-only bearer token>"
+$env:MIRAIVFX_API_BASE = "https://api.miraivfx.art/api"
+$env:MIRAIVFX_APP_BASE = "https://miraivfx.art"
+$env:MIRAIVFX_LOGTO_ENDPOINT = "https://auth.miraivfx.art"
+$env:MIRAIVFX_LOGTO_APP_ID = "<cli-or-public-logto-app-id>"
+$env:MIRAIVFX_AUTH_REDIRECT_URI = "http://127.0.0.1:39173/callback"
 ```
 
-`MIRAIVFX_TOKEN` is a temporary local bridge until browser OAuth/PKCE login is implemented. Do not paste tokens into agent chats and do not commit them.
+`mir-cli auth login` uses browser OAuth/PKCE. The Logto app must allow the configured localhost redirect URI. `MIRAIVFX_TOKEN` remains a local development bridge only; do not paste tokens into agent chats and do not commit them.
 
 Full node parameters require an explicit command:
 
@@ -61,4 +63,4 @@ mir-cli canvas inspect --canvas-id <canvas_id> --json
 
 ## Repository Status
 
-This is the initial scaffold. API calls and authentication are intentionally stubbed until the Miraivfx backend endpoints and auth flow are finalized.
+This repository contains the first API-backed CLI implementation. Generation and canvas mutation commands remain gated behind explicit future work.

@@ -4,11 +4,11 @@
 
 ## Authentication
 
-- `mir-cli auth login` should open a browser-based Miraivfx / Logto authorization flow.
+- `mir-cli auth login` opens a browser-based Miraivfx / Logto authorization flow with PKCE.
 - The user enters credentials only in the browser.
-- The CLI stores local authorization data in a secure local store.
+- The CLI stores local authorization data under the user's home directory as a first implementation. A system keychain backend should replace this before broad distribution.
 - Agent tools must never receive passwords or raw tokens.
-- `MIRAIVFX_TOKEN` is allowed only as a local development bridge until OAuth/PKCE is implemented.
+- `MIRAIVFX_TOKEN` is allowed only as a local development bridge.
 
 ## Data Access
 

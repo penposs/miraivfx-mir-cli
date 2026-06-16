@@ -8,7 +8,7 @@ mir-cli auth login
 mir-cli auth logout
 ```
 
-`auth login` is planned as a browser OAuth/PKCE flow. Until then, local development can use `MIRAIVFX_TOKEN` from the shell environment. Agents must not request or display raw tokens.
+`auth login` uses browser OAuth/PKCE and listens on `MIRAIVFX_AUTH_REDIRECT_URI`, defaulting to `http://127.0.0.1:39173/callback`. The Miraivfx Logto app must allow that redirect URI. Local development can still use `MIRAIVFX_TOKEN` from the shell environment. Agents must not request or display raw tokens.
 
 ## Projects
 
