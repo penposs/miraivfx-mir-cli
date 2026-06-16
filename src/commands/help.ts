@@ -16,8 +16,6 @@ Usage:
   mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "Prompt" --model <model_id> --yes --open --json
   mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <image_url> --connect-to <node_id> --yes --json
   mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
-  mir-cli canvas status --task-id <task_id> --json
-  mir-cli canvas download --task-id <task_id> --out ./downloads
 
-Canvas node commands write saved canvas JSON only. They do not start generation unless a command explicitly says so and requires --allow-generation.`);
+Canvas node commands append allowed nodes only. Generation submission, task status, and downloads are manual web actions.`);
 }

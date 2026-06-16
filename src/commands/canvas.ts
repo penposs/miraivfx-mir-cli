@@ -1,6 +1,5 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import { getFlagValue, hasFlag } from "../core/args.js";
 import { ApiClient } from "../api/client.js";
 import { loadRuntimeConfig } from "../core/config.js";
@@ -99,22 +98,14 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
   }
 
   if (subcommand === "status") {
-    const taskId = requireValue(getFlagValue(args, "--task-id"), "--task-id");
-    const response = await api.getJson<TaskStatusResponse>(`/tasks/${encodeURIComponent(taskId)}`);
-    json(normalizeTaskStatus(taskId, response));
+    const payload = manualWebOnlyPayload("canvas status");
+    asJson ? json(payload) : text(payload.message);
     return;
   }
 
   if (subcommand === "download") {
-    const outDir = getFlagValue(args, "--out") ?? ".";
-    const explicitUrl = getFlagValue(args, "--url");
-    const taskId = getFlagValue(args, "--task-id");
-    const url = explicitUrl ?? (taskId ? await resolveTaskResultUrl(api, taskId) : undefined);
-    if (!url) {
-      throw new Error("Missing --url or a --task-id with downloadable result");
-    }
-    const result = await downloadUrl(url, outDir, config.token, config.apiBase);
-    json(result);
+    const payload = manualWebOnlyPayload("canvas download");
+    asJson ? json(payload) : text(payload.message);
     return;
   }
 
@@ -142,16 +133,21 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
   }
 
   if (["plan", "deploy", "run"].includes(subcommand)) {
-    const payload = {
-      ok: false,
-      command: `canvas ${subcommand}`,
-      reason: "command_not_implemented",
-    };
-    asJson ? json(payload) : text(`canvas ${subcommand} is planned but not implemented yet.`);
+    const payload = manualWebOnlyPayload(`canvas ${subcommand}`);
+    asJson ? json(payload) : text(payload.message);
     return;
   }
 
-  text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|node|plan|deploy|run|status|download>");
+  text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|node>");
+}
+
+function manualWebOnlyPayload(command: string): { ok: false; command: string; code: string; message: string } {
+  return {
+    ok: false,
+    command,
+    code: "manual_web_only",
+    message: `${command} is intentionally disabled in mir-cli. Open the canvas in MiraiVFX to submit, inspect task status, or download results manually.`,
+  };
 }
 
 async function listAllCanvases(api: ApiClient): Promise<{ canvases: CanvasListItem[] }> {
@@ -566,99 +562,6 @@ interface UploadResponse {
   converted_to_jpg?: boolean;
 }
 
-interface TaskStatusResponse {
-  task?: Record<string, unknown>;
-  history_record?: Record<string, unknown> | null;
-  status?: string;
-  data?: unknown;
-}
-
-function normalizeTaskStatus(taskId: string, response: TaskStatusResponse): Record<string, unknown> {
-  const task = response.task ?? {};
-  const record = response.history_record ?? null;
-  return {
-    task_id: String(task.task_id ?? taskId),
-    status: String(task.status ?? record?.status ?? response.status ?? "unknown"),
-    progress: task.progress,
-    result: task.result,
-    result_url: pickResultUrl(response),
-    error: task.error ?? record?.error ?? record?.error_message ?? null,
-    history_record: record,
-  };
-}
-
-async function resolveTaskResultUrl(api: ApiClient, taskId: string): Promise<string | undefined> {
-  const response = await api.getJson<TaskStatusResponse>(`/tasks/${encodeURIComponent(taskId)}`);
-  return pickResultUrl(response);
-}
-
-function pickResultUrl(response: TaskStatusResponse): string | undefined {
-  const task = response.task ?? {};
-  const record = response.history_record ?? {};
-  const result = task.result as Record<string, unknown> | undefined;
-  const candidates = [
-    record.result_url,
-    record.imageUrl,
-    record.video_url,
-    record.image_url,
-    result?.url,
-    result?.imageUrl,
-    result?.video_url,
-    result?.image_url,
-  ];
-  return candidates.find((value): value is string => typeof value === "string" && value.length > 0);
-}
-
-async function downloadUrl(
-  url: string,
-  outDir: string,
-  token: string | undefined,
-  apiBase: string,
-): Promise<Record<string, unknown>> {
-  const parsedUrl = validateDownloadUrl(url, apiBase);
-  const response = await fetch(parsedUrl, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!response.ok) {
-    throw new Error(`Download failed: HTTP ${response.status}`);
-  }
-  await mkdir(outDir, { recursive: true });
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const filename = getDownloadFilename(parsedUrl.href, response.headers.get("content-disposition"));
-  const outputPath = await nextAvailablePath(outDir, filename);
-  await writeFile(outputPath, bytes);
-  return {
-    ok: true,
-    url: parsedUrl.href,
-    output_path: outputPath,
-    filename: basename(outputPath),
-    size: bytes.byteLength,
-  };
-}
-
-function validateDownloadUrl(url: string, apiBase: string): URL {
-  let parsed: URL;
-  try {
-    parsed = url.startsWith("/") ? new URL(url, new URL(apiBase).origin) : new URL(url);
-  } catch {
-    throw new Error("Download URL must be an absolute URL");
-  }
-
-  const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-  if (parsed.protocol !== "https:" && !(isLocalhost && parsed.protocol === "http:")) {
-    throw new Error("Download URL must use https, except localhost development URLs");
-  }
-
-  const allowedHosts = getAllowedDownloadHosts(apiBase);
-  if (!isAllowedHost(parsed.hostname, allowedHosts)) {
-    throw new Error(
-      `Download host is not trusted: ${parsed.hostname}. Set MIRAIVFX_DOWNLOAD_HOSTS to add an approved host.`,
-    );
-  }
-
-  return parsed;
-}
-
 function getAllowedDownloadHosts(apiBase: string): string[] {
   const configured = process.env.MIRAIVFX_DOWNLOAD_HOSTS?.split(",") ?? [];
   let apiHost: string | undefined;
@@ -680,44 +583,4 @@ function getAllowedDownloadHosts(apiBase: string): string[] {
 function isAllowedHost(hostname: string, allowedHosts: string[]): boolean {
   const host = hostname.toLowerCase();
   return allowedHosts.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
-}
-
-function getDownloadFilename(url: string, contentDisposition: string | null): string {
-  const match = contentDisposition?.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
-  const headerName = match?.[1] ?? match?.[2];
-  if (headerName) return sanitizeDownloadFilename(decodeURIComponent(headerName));
-  try {
-    const parsed = new URL(url);
-    const name = basename(parsed.pathname);
-    return sanitizeDownloadFilename(name || "download.bin");
-  } catch {
-    return "download.bin";
-  }
-}
-
-function sanitizeDownloadFilename(filename: string): string {
-  const safe = basename(filename)
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
-    .replace(/^\.+$/, "")
-    .trim();
-  return safe || "download.bin";
-}
-
-async function nextAvailablePath(outDir: string, filename: string): Promise<string> {
-  const safeName = sanitizeDownloadFilename(filename);
-  const dotIndex = safeName.lastIndexOf(".");
-  const stem = dotIndex > 0 ? safeName.slice(0, dotIndex) : safeName;
-  const ext = dotIndex > 0 ? safeName.slice(dotIndex) : "";
-
-  for (let index = 0; index < 1000; index += 1) {
-    const candidate = index === 0 ? join(outDir, safeName) : join(outDir, `${stem}-${index}${ext}`);
-    try {
-      await stat(candidate);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return candidate;
-      throw error;
-    }
-  }
-
-  throw new Error("Could not find an available output filename");
 }

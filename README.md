@@ -1,6 +1,6 @@
 # Miraivfx MIR CLI
 
-`mir-cli` is an agent-friendly command line interface for Miraivfx projects, canvases, model discovery, uploads, task status, and result downloads.
+`mir-cli` is an agent-friendly command line interface for Miraivfx projects, canvases, model discovery, uploads, and safe canvas node creation.
 
 The primary users are Codex, Claude, Cursor Agent, and similar tools. The CLI exposes stable commands and machine-readable JSON so agents can help users list projects, open canvases, inspect canvas summaries, create plans, and execute confirmed canvas changes.
 
@@ -30,8 +30,6 @@ mir-cli canvas inspect --canvas-id <canvas_id> --summary
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --open --json
 mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_image_url> --connect-to <node_id> --yes --json
 mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
-mir-cli canvas status --task-id <task_id> --json
-mir-cli canvas download --task-id <task_id> --out ./downloads
 ```
 
 During the first API integration phase, configure local API settings with environment variables:
@@ -60,10 +58,11 @@ mir-cli canvas inspect --canvas-id <canvas_id> --json
 - The CLI must not access the database directly.
 - Summary commands should be used before full node inspection.
 - Uploads require `--allow-upload`.
-- Mutations require explicit confirmation flags such as `--yes` or `--allow-generation`.
+- Mutations require explicit confirmation flags such as `--yes`.
 - Canvas node mutations use backend ops and append to the current server canvas instead of replacing the whole canvas.
+- Generation submission, task status, and result downloads are intentionally web-only in the first release.
 - Project and canvas access must be enforced by the Miraivfx backend.
 
 ## Repository Status
 
-This repository contains the first API-backed CLI implementation. Safe canvas node creation is available behind explicit confirmation; generation submission remains gated behind future `--allow-generation` work.
+This repository contains the first API-backed CLI implementation. Safe canvas node creation is available behind explicit confirmation; generation submission, task polling, and downloads remain manual actions in the Miraivfx web app.

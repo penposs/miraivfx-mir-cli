@@ -1,6 +1,6 @@
 # Miraivfx MIR CLI Skill
 
-Use this skill when the user asks an agent to operate Miraivfx projects, canvases, canvas nodes, model discovery, uploads, task status, or result downloads through `mir-cli`.
+Use this skill when the user asks an agent to operate Miraivfx projects, canvases, canvas nodes, model discovery, uploads, or safe canvas setup through `mir-cli`.
 
 ## Required Flow
 
@@ -17,8 +17,9 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
    - `mir-cli canvas models --task image --json`
    - `mir-cli canvas models --task video --json`
 6. Show a concise plan and risk summary before any mutation.
-7. Run `deploy --yes` only after user confirmation.
-8. Run generation only after separate confirmation with `--allow-generation`.
+7. Use `mir-cli canvas upload --allow-upload` only when the user explicitly asked to upload a local asset.
+8. Use `mir-cli canvas node ... --yes` only to append allowed nodes and connections.
+9. Open the canvas for the user to manually submit generation, inspect task status, and download results.
 
 ## Safety Rules
 
@@ -26,5 +27,5 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 - Do not ask the user to paste tokens.
 - Do not read browser localStorage.
 - Do not access the database directly.
-- Do not trigger generation or retry tasks without explicit confirmation.
+- Do not trigger generation, retry tasks, poll task status, or download results from the CLI.
 - Preserve run directories and execution logs.

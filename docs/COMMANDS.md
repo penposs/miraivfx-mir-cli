@@ -58,18 +58,18 @@ mir-cli canvas models --task video --json
 
 ```powershell
 mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
-mir-cli canvas status --task-id <task_id> --json
-mir-cli canvas download --task-id <task_id> --out runs/<run-id>/05-execution
-mir-cli canvas download --url <result_url> --out runs/<run-id>/05-execution
 ```
 
-`canvas download` sends the saved user bearer token when downloading protected Miraivfx API URLs, only accepts trusted Miraivfx hosts by default, and will not overwrite an existing local file. If production media is served from an additional signed CDN host, add it explicitly with `MIRAIVFX_DOWNLOAD_HOSTS=cdn.example.com,media.example.com`.
+Uploads are allowed only after the caller passes `--allow-upload`. When a `project_id` is provided, the backend verifies that the project belongs to the current logged-in user before storing the file under that project.
+
+`canvas status` and `canvas download` are intentionally disabled in the first release. Users inspect task state and download results from the Miraivfx web canvas.
 
 ## Planning And Execution
 
 ```powershell
-mir-cli canvas plan --input brief.md --project-id <project_id> --canvas-id <canvas_id>
-mir-cli canvas deploy --plan runs/<run-id>/canvas-plan.json
-mir-cli canvas deploy --plan runs/<run-id>/canvas-plan.json --yes
-mir-cli canvas run --plan runs/<run-id>/canvas-plan.json --approved-task <task_id> --allow-generation
+mir-cli canvas plan --json
+mir-cli canvas deploy --json
+mir-cli canvas run --json
 ```
+
+`canvas plan`, `canvas deploy`, and `canvas run` currently return `manual_web_only`. The first release is a safe canvas builder: it can log in, list/create projects, list/create/open/inspect canvases, discover CLI-safe model metadata, upload assets, and append allowed canvas nodes. Generation submission remains a manual web action.

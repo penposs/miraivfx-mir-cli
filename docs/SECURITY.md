@@ -26,18 +26,17 @@
 - Creating or updating canvas nodes requires explicit confirmation.
 - `canvas node add-image` requires `--yes`, validates the requested image model against the CLI-safe model endpoint, writes `status=idle`, and does not submit a generation task.
 - Node creation commands call backend canvas ops so they append nodes and connections to the latest server canvas instead of PUT-ing a full stale canvas snapshot.
-- Generation requires `--allow-generation`.
 - Uploading material requires `--allow-upload`.
-- Downloading results requires an explicit `--task-id` or `--url`.
-- Protected Miraivfx API downloads include the saved user bearer token.
-- Download URLs are restricted to trusted Miraivfx hosts by default. Extra approved hosts must be added through `MIRAIVFX_DOWNLOAD_HOSTS`.
-- Downloaded filenames are sanitized and existing files are not overwritten.
+- Generation submission, task status inspection, and result downloads are web-only actions in the first release.
+- `canvas status`, `canvas download`, `canvas plan`, `canvas deploy`, and `canvas run` return `manual_web_only` and do not call task or download APIs.
 - Full-canvas saves are for the website and must be protected by backend `baseRevision` checks. CLI node mutations should use ops endpoints.
 
 ## Backend Responsibilities
 
+- Restrict the dedicated CLI Logto app id to the allowed API route list.
 - Resolve the current user from the bearer token.
 - Validate project ownership for every `project_id`.
 - Validate canvas ownership for every `canvas_id`.
 - Validate upload ownership when a `project_id` is provided.
 - Return only public model metadata to CLI clients.
+- Validate canvas ops by node type, status, and safe data fields so CLI clients cannot write task, billing, upstream, or internal result fields.
