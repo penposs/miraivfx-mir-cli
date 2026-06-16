@@ -23,6 +23,8 @@
 - Generation requires `--allow-generation`.
 - Uploading material requires `--allow-upload`.
 - Downloading results requires an explicit `--task-id` or `--url`.
+- Download URLs are restricted to trusted Miraivfx hosts by default. Extra approved hosts must be added through `MIRAIVFX_DOWNLOAD_HOSTS`.
+- Downloaded filenames are sanitized and existing files are not overwritten.
 - Before writing a canvas, the CLI must compare `revision` and `clientModifiedAt` to avoid overwriting browser-side changes.
 
 ## Backend Responsibilities

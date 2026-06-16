@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { getFlagValue, hasFlag } from "../core/args.js";
 import { ApiClient } from "../api/client.js";
@@ -367,33 +367,101 @@ function pickResultUrl(response: TaskStatusResponse): string | undefined {
 }
 
 async function downloadUrl(url: string, outDir: string): Promise<Record<string, unknown>> {
-  const response = await fetch(url);
+  const parsedUrl = validateDownloadUrl(url);
+  const response = await fetch(parsedUrl);
   if (!response.ok) {
     throw new Error(`Download failed: HTTP ${response.status}`);
   }
   await mkdir(outDir, { recursive: true });
   const bytes = new Uint8Array(await response.arrayBuffer());
-  const filename = getDownloadFilename(url, response.headers.get("content-disposition"));
-  const outputPath = join(outDir, filename);
+  const filename = getDownloadFilename(parsedUrl.href, response.headers.get("content-disposition"));
+  const outputPath = await nextAvailablePath(outDir, filename);
   await writeFile(outputPath, bytes);
   return {
     ok: true,
-    url,
+    url: parsedUrl.href,
     output_path: outputPath,
-    filename,
+    filename: basename(outputPath),
     size: bytes.byteLength,
   };
+}
+
+function validateDownloadUrl(url: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("Download URL must be an absolute URL");
+  }
+
+  const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (parsed.protocol !== "https:" && !(isLocalhost && parsed.protocol === "http:")) {
+    throw new Error("Download URL must use https, except localhost development URLs");
+  }
+
+  const allowedHosts = getAllowedDownloadHosts();
+  if (!isAllowedHost(parsed.hostname, allowedHosts)) {
+    throw new Error(
+      `Download host is not trusted: ${parsed.hostname}. Set MIRAIVFX_DOWNLOAD_HOSTS to add an approved host.`,
+    );
+  }
+
+  return parsed;
+}
+
+function getAllowedDownloadHosts(): string[] {
+  const configured = process.env.MIRAIVFX_DOWNLOAD_HOSTS?.split(",") ?? [];
+  return [
+    "miraivfx.art",
+    "api.miraivfx.art",
+    "cdn.miraivfx.art",
+    ...configured,
+  ]
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isAllowedHost(hostname: string, allowedHosts: string[]): boolean {
+  const host = hostname.toLowerCase();
+  return allowedHosts.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
 }
 
 function getDownloadFilename(url: string, contentDisposition: string | null): string {
   const match = contentDisposition?.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
   const headerName = match?.[1] ?? match?.[2];
-  if (headerName) return decodeURIComponent(headerName);
+  if (headerName) return sanitizeDownloadFilename(decodeURIComponent(headerName));
   try {
     const parsed = new URL(url);
     const name = basename(parsed.pathname);
-    return name || "download.bin";
+    return sanitizeDownloadFilename(name || "download.bin");
   } catch {
     return "download.bin";
   }
+}
+
+function sanitizeDownloadFilename(filename: string): string {
+  const safe = basename(filename)
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/^\.+$/, "")
+    .trim();
+  return safe || "download.bin";
+}
+
+async function nextAvailablePath(outDir: string, filename: string): Promise<string> {
+  const safeName = sanitizeDownloadFilename(filename);
+  const dotIndex = safeName.lastIndexOf(".");
+  const stem = dotIndex > 0 ? safeName.slice(0, dotIndex) : safeName;
+  const ext = dotIndex > 0 ? safeName.slice(dotIndex) : "";
+
+  for (let index = 0; index < 1000; index += 1) {
+    const candidate = index === 0 ? join(outDir, safeName) : join(outDir, `${stem}-${index}${ext}`);
+    try {
+      await stat(candidate);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return candidate;
+      throw error;
+    }
+  }
+
+  throw new Error("Could not find an available output filename");
 }

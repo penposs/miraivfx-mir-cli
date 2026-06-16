@@ -46,6 +46,8 @@ mir-cli canvas download --task-id <task_id> --out runs/<run-id>/05-execution
 mir-cli canvas download --url <result_url> --out runs/<run-id>/05-execution
 ```
 
+`canvas download` only accepts trusted Miraivfx hosts by default and will not overwrite an existing local file. If production media is served from an additional signed CDN host, add it explicitly with `MIRAIVFX_DOWNLOAD_HOSTS=cdn.example.com,media.example.com`.
+
 ## Planning And Execution
 
 ```powershell
