@@ -30,6 +30,7 @@ mir-cli canvas inspect --canvas-id <canvas_id> --summary
 mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Planning note" --yes --json
 mir-cli canvas node add --canvas-id <canvas_id> --type video --prompt "A cinematic shot" --model <model_id> --yes --json
 mir-cli canvas node add --canvas-id <canvas_id> --type suno --prompt "Song idea" --data-json "{\"sunoMode\":\"description\"}" --yes --json
+mir-cli canvas node connect --canvas-id <canvas_id> --from-node <asset_node_id> --to-node <generation_node_id> --yes --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --open --json
 mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_image_url> --connect-to <node_id> --yes --json
 mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
@@ -64,6 +65,8 @@ mir-cli canvas inspect --canvas-id <canvas_id> --json
 - Mutations require explicit confirmation flags such as `--yes`.
 - Canvas node mutations use backend ops and append to the current server canvas instead of replacing the whole canvas.
 - `canvas node add --type <node-type>` supports the Miraivfx canvas node types exposed by `canvas capabilities`; action/generation nodes are created as idle canvas nodes only.
+- For multi-node canvas setup, upload and place each unique asset once, then connect the shared asset node to every generation node that needs it. Do not create duplicate asset nodes for every shot in the same operation.
+- Use a readable lane layout: shared assets on the left, generation/action nodes on the right in timeline order, with enough space between groups for future result nodes.
 - Generation submission, task status, and result downloads are intentionally web-only in the first release.
 - Project and canvas access must be enforced by the Miraivfx backend.
 

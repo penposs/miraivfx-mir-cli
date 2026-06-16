@@ -36,6 +36,7 @@ mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Planning 
 mir-cli canvas node add --canvas-id <canvas_id> --type video --prompt "A cinematic shot" --model <model_id> --yes --json
 mir-cli canvas node add --canvas-id <canvas_id> --type suno --prompt "Song idea" --data-json "{\"sunoMode\":\"description\"}" --yes --json
 mir-cli canvas node add --canvas-id <canvas_id> --type seedance2-rh-standard --prompt "Video prompt" --data-json "{\"ratio\":\"16:9\",\"duration\":\"5\"}" --yes --json
+mir-cli canvas node connect --canvas-id <canvas_id> --from-node <asset_node_id> --to-node <generation_node_id> --yes --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --open --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --settings-json "{\"size\":\"1024x1024\"}" --yes --json
@@ -50,7 +51,20 @@ Common aliases are also available: `add-text`, `add-video`, `add-audio`, `add-vi
 
 `canvas node add-reference-image` creates a visible `image-item` node from an uploaded or trusted image URL. Use `--connect-to` when the reference image should feed a generation node on the canvas.
 
+`canvas node connect` appends a connection between two existing nodes. Use it to reuse a shared asset node across many generation nodes instead of creating duplicate reference nodes.
+
 Node mutation commands use the backend canvas ops endpoint. They append nodes and connections to the latest server canvas and do not PUT a complete `nodes/connections` snapshot.
+
+## Multi-Node Layout Rules
+
+When an agent builds a multi-shot or multi-node canvas in one operation, it should plan coordinates and asset reuse before mutating the canvas.
+
+- Upload each unique local file once per operation. If the same file is needed by multiple shots, reuse the uploaded URL.
+- Create at most one visible material node for each unique asset in the operation. Connect that asset node to every generation/action node that needs it.
+- Place shared asset nodes on the left side of the canvas in compact columns, grouped by role, scene, prop, audio, or file where practical.
+- Place generation/action nodes on the right side in storyboard or timeline order.
+- Leave a result lane or gap beside each generation node group so future generated output nodes can be added without overlapping references or prompts.
+- Keep spacing deterministic and moderate: no overlapping nodes, no repeated duplicate references, and no excessively sparse layout that makes the canvas hard to inspect.
 
 ## Capabilities And Models
 

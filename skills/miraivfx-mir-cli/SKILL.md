@@ -19,7 +19,17 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 6. Show a concise plan and risk summary before any mutation.
 7. Use `mir-cli canvas upload --allow-upload` only when the user explicitly asked to upload a local asset.
 8. Use `mir-cli canvas node add --type <node-type> ... --yes` only to append allowed nodes and connections. Read `mir-cli canvas capabilities --json` for supported node types.
-9. Open the canvas for the user to manually submit generation, inspect task status, and download results.
+9. Use `mir-cli canvas node connect --from-node <asset_node_id> --to-node <generation_node_id> --yes` to reuse an existing asset node across multiple generation nodes.
+10. Open the canvas for the user to manually submit generation, inspect task status, and download results.
+
+## Canvas Layout And Asset Reuse Rules
+
+- In one canvas-building operation, upload each unique local asset once and create at most one visible material node for that asset. Reuse it by adding connections to every generation/action node that needs it.
+- Treat the left side of the layout as the shared asset library: place role, scene, prop, audio, and file reference nodes in compact columns with stable spacing.
+- Treat the right side as the generation lane: place image/video/audio/Seedance/RunningHub/action nodes in timeline order, with enough horizontal space to their right or lower-right for future result nodes.
+- For storyboard or multi-shot work, do not duplicate identical asset nodes inside every shot group. Create one shared asset node and connect it to multiple shot nodes.
+- Keep groups readable but compact: avoid overlapping nodes, avoid excessive blank space, and reserve a small gap between shot groups so generated result nodes can be added later without covering prompts or references.
+- Prefer deterministic coordinates in grids or lanes. Agents should compute positions before mutating the canvas instead of relying on manual drag cleanup.
 
 ## Safety Rules
 

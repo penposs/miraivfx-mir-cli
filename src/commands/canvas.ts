@@ -120,6 +120,11 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       asJson ? json(result) : text(`Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
+    if (action === "connect") {
+      const result = await connectCanvasNodes(api, rest, config.appBase);
+      asJson ? json(result) : text(`Connected ${result.from_node} -> ${result.to_node} on ${result.canvas_id}`);
+      return;
+    }
     if (action === "add-image") {
       const result = await addImageNode(api, rest, config.appBase);
       if (result.opened && typeof result.url === "string") {
@@ -145,7 +150,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       asJson ? json(result) : text(`Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
-    text("Usage: mir-cli canvas node <add|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d>");
+    text("Usage: mir-cli canvas node <add|connect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d>");
     return;
   }
 
@@ -469,6 +474,49 @@ async function addImageNode(api: ApiClient, args: string[], appBase: string): Pr
     revision: update.data?.revision,
     clientModifiedAt: update.data?.clientModifiedAt,
     generation_started: false,
+  };
+}
+
+async function connectCanvasNodes(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
+  if (!hasFlag(args, "--yes")) {
+    throw new Error("Creating a canvas connection requires explicit --yes");
+  }
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const fromNode = requireValue(getFlagValue(args, "--from-node") ?? getFlagValue(args, "--from"), "--from-node");
+  const toNode = requireValue(getFlagValue(args, "--to-node") ?? getFlagValue(args, "--to"), "--to-node");
+  const now = Date.now();
+
+  const update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
+    conflictPolicy: "merge",
+    clientModifiedAt: now,
+    ops: [
+      {
+        type: "connect",
+        id: randomUUID(),
+        fromNode,
+        toNode,
+      },
+    ],
+  });
+
+  if (!update.success) {
+    throw new Error(update.error ?? "Failed to connect canvas nodes");
+  }
+  if (update.data?.ignored) {
+    throw new Error("Canvas update was ignored because the server has a newer version. Re-inspect the canvas and retry.");
+  }
+
+  const projectId = requireValue(update.data?.project_id, "ops response project_id");
+  const url = `${appBase}/canvas?projectId=${encodeURIComponent(projectId)}&canvasId=${encodeURIComponent(canvasId)}`;
+  return {
+    ok: true,
+    canvas_id: canvasId,
+    project_id: projectId,
+    url,
+    from_node: fromNode,
+    to_node: toNode,
+    revision: update.data?.revision,
+    clientModifiedAt: update.data?.clientModifiedAt,
   };
 }
 
