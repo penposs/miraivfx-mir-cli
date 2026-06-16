@@ -6,7 +6,7 @@ export function text(value: string): void {
   console.log(value);
 }
 
-export function fail(message: string, code: number): never {
+export function fail(message: string, code: number): void {
   console.error(message);
-  process.exit(code);
+  process.exitCode = code;
 }
