@@ -42,6 +42,8 @@ mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_
 
 `canvas node add-reference-image` creates a visible `image-item` node from an uploaded or trusted image URL. Use `--connect-to` when the reference image should feed a generation node on the canvas.
 
+Node mutation commands use the backend canvas ops endpoint. They append nodes and connections to the latest server canvas and do not PUT a complete `nodes/connections` snapshot.
+
 ## Capabilities And Models
 
 ```powershell

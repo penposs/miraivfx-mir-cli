@@ -61,6 +61,7 @@ mir-cli canvas inspect --canvas-id <canvas_id> --json
 - Summary commands should be used before full node inspection.
 - Uploads require `--allow-upload`.
 - Mutations require explicit confirmation flags such as `--yes` or `--allow-generation`.
+- Canvas node mutations use backend ops and append to the current server canvas instead of replacing the whole canvas.
 - Project and canvas access must be enforced by the Miraivfx backend.
 
 ## Repository Status

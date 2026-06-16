@@ -249,11 +249,6 @@ async function addImageNode(api: ApiClient, args: string[], appBase: string): Pr
     await assertModelAvailable(api, "image", model);
   }
 
-  const response = await api.getJson<GetCanvasResponse>(`/canvas/${encodeURIComponent(canvasId)}`);
-  if (!response.success || !response.data) {
-    throw new Error(response.error ?? "Canvas not found");
-  }
-  const canvas = response.data;
   const now = Date.now();
   const node: CanvasNodeRecord = {
     id: randomUUID(),
@@ -275,25 +270,25 @@ async function addImageNode(api: ApiClient, args: string[], appBase: string): Pr
     status: "idle",
   };
 
-  const update = await api.putJson<UpdateCanvasResponse>(`/canvas/${encodeURIComponent(canvas.id)}`, {
-    nodes: [...(canvas.nodes ?? []), node],
-    connections: canvas.connections ?? [],
-    clientHydrated: true,
+  const update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
+    conflictPolicy: "merge",
     clientModifiedAt: now,
+    ops: [{ type: "add_node", node }],
   });
 
   if (!update.success) {
-    throw new Error(update.error ?? "Failed to update canvas");
+    throw new Error(update.error ?? "Failed to apply canvas ops");
   }
   if (update.data?.ignored) {
     throw new Error("Canvas update was ignored because the server has a newer version. Re-inspect the canvas and retry.");
   }
 
-  const url = `${appBase}/canvas?projectId=${encodeURIComponent(canvas.project_id)}&canvasId=${encodeURIComponent(canvas.id)}`;
+  const projectId = requireValue(update.data?.project_id, "ops response project_id");
+  const url = `${appBase}/canvas?projectId=${encodeURIComponent(projectId)}&canvasId=${encodeURIComponent(canvasId)}`;
   return {
     ok: true,
-    canvas_id: canvas.id,
-    project_id: canvas.project_id,
+    canvas_id: canvasId,
+    project_id: projectId,
     url,
     opened: shouldOpen,
     node_id: node.id,
@@ -319,15 +314,6 @@ async function addReferenceImageNode(api: ApiClient, args: string[], appBase: st
   const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y") ?? 0;
   const connectTo = getFlagValue(args, "--connect-to");
 
-  const response = await api.getJson<GetCanvasResponse>(`/canvas/${encodeURIComponent(canvasId)}`);
-  if (!response.success || !response.data) {
-    throw new Error(response.error ?? "Canvas not found");
-  }
-  const canvas = response.data;
-  if (connectTo && !canvas.nodes.some((node) => isRecord(node) && node.id === connectTo)) {
-    throw new Error(`Cannot connect to missing node: ${connectTo}`);
-  }
-
   const now = Date.now();
   const node: CanvasNodeRecord = {
     id: randomUUID(),
@@ -348,31 +334,35 @@ async function addReferenceImageNode(api: ApiClient, args: string[], appBase: st
   };
   const connection = connectTo
     ? {
+        type: "connect",
         id: randomUUID(),
         fromNode: node.id,
         toNode: connectTo,
       }
     : undefined;
 
-  const update = await api.putJson<UpdateCanvasResponse>(`/canvas/${encodeURIComponent(canvas.id)}`, {
-    nodes: [...(canvas.nodes ?? []), node],
-    connections: connection ? [...(canvas.connections ?? []), connection] : (canvas.connections ?? []),
-    clientHydrated: true,
+  const update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
+    conflictPolicy: "merge",
     clientModifiedAt: now,
+    ops: [
+      { type: "add_node", node },
+      ...(connection ? [connection] : []),
+    ],
   });
 
   if (!update.success) {
-    throw new Error(update.error ?? "Failed to update canvas");
+    throw new Error(update.error ?? "Failed to apply canvas ops");
   }
   if (update.data?.ignored) {
     throw new Error("Canvas update was ignored because the server has a newer version. Re-inspect the canvas and retry.");
   }
 
-  const url = `${appBase}/canvas?projectId=${encodeURIComponent(canvas.project_id)}&canvasId=${encodeURIComponent(canvas.id)}`;
+  const projectId = requireValue(update.data?.project_id, "ops response project_id");
+  const url = `${appBase}/canvas?projectId=${encodeURIComponent(projectId)}&canvasId=${encodeURIComponent(canvasId)}`;
   return {
     ok: true,
-    canvas_id: canvas.id,
-    project_id: canvas.project_id,
+    canvas_id: canvasId,
+    project_id: projectId,
     url,
     opened: shouldOpen,
     node_id: node.id,
@@ -436,10 +426,6 @@ function formatCanvasList(canvases: CanvasListItem[]): string {
 function requireValue(value: string | undefined, flag: string): string {
   if (!value) throw new Error(`Missing ${flag}`);
   return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function validateCanvasAssetUrl(value: string): void {
@@ -533,14 +519,17 @@ interface CanvasNodeRecord {
   status: "idle" | "completed";
 }
 
-interface UpdateCanvasResponse {
+interface CanvasOpsResponse {
   success: boolean;
   data?: {
     revision?: number;
+    project_id?: string;
     updatedAt?: number;
     clientModifiedAt?: number;
     ignored?: boolean;
     name?: string;
+    nodes?: Array<Record<string, unknown>>;
+    connections?: Array<Record<string, unknown>>;
   };
   error?: string;
 }
