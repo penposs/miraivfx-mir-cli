@@ -1,0 +1,49 @@
+# Miraivfx MIR CLI
+
+`mir-cli` is an agent-friendly command line interface for Miraivfx projects, canvases, model discovery, uploads, task status, and result downloads.
+
+The primary users are Codex, Claude, Cursor Agent, and similar tools. The CLI exposes stable commands and machine-readable JSON so agents can help users list projects, open canvases, inspect canvas summaries, create plans, and execute confirmed canvas changes.
+
+## Install
+
+```powershell
+npm i -g @miraivfx/mir-cli
+```
+
+Or run without installing:
+
+```powershell
+npx @miraivfx/mir-cli --help
+```
+
+## Typical Flow
+
+```powershell
+mir-cli auth status
+mir-cli auth login
+mir-cli project list --json
+mir-cli canvas list --project-id <project_id> --json
+mir-cli canvas open --canvas-id <canvas_id>
+mir-cli canvas capabilities --json
+mir-cli canvas models --task image --json
+mir-cli canvas inspect --canvas-id <canvas_id> --summary
+```
+
+Full node parameters require an explicit command:
+
+```powershell
+mir-cli canvas inspect --canvas-id <canvas_id> --json
+```
+
+## Safety Rules
+
+- The CLI must not ask for user passwords.
+- The CLI must not ask users to paste tokens into agent chats.
+- The CLI must not read browser localStorage.
+- The CLI must not access the database directly.
+- Mutations require explicit confirmation flags such as `--yes` or `--allow-generation`.
+- Project and canvas access must be enforced by the Miraivfx backend.
+
+## Repository Status
+
+This is the initial scaffold. API calls and authentication are intentionally stubbed until the Miraivfx backend endpoints and auth flow are finalized.
