@@ -82,5 +82,4 @@ A good agent flow is:
 ## More Documentation
 
 - `docs/COMMANDS.md`: command reference.
-- `docs/SECURITY.md`: user-facing safety model.
 - `skills/miraivfx-mir-cli/SKILL.md`: agent operating rules.
