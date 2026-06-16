@@ -55,7 +55,8 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
 
   if (subcommand === "models") {
     const task = getFlagValue(args, "--task") ?? "all";
-    const response = await api.getJson<ModelsResponse>("/models");
+    const query = task === "all" ? "" : `?task=${encodeURIComponent(task)}`;
+    const response = await api.getJson<ModelsResponse>(`/canvas/models${query}`);
     json({ task, models: normalizeModels(response, task) });
     return;
   }
@@ -111,7 +112,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
     if (!url) {
       throw new Error("Missing --url or a --task-id with downloadable result");
     }
-    const result = await downloadUrl(url, outDir);
+    const result = await downloadUrl(url, outDir, config.token, config.apiBase);
     json(result);
     return;
   }
@@ -212,6 +213,9 @@ function normalizeModels(response: ModelsResponse, task: string): Array<Record<s
   if (Array.isArray(response.data)) {
     rows.push(...response.data);
   }
+  if (response.data && !Array.isArray(response.data) && Array.isArray(response.data.models)) {
+    rows.push(...response.data.models);
+  }
   if (response.providers) {
     for (const [provider, providerData] of Object.entries(response.providers)) {
       for (const model of providerData.models ?? []) {
@@ -224,11 +228,11 @@ function normalizeModels(response: ModelsResponse, task: string): Array<Record<s
     .map((model) => ({
       model_id: model.id,
       display_name: model.label ?? model.name ?? model.id,
-      task: model.model_type ?? model.type ?? task,
+      task: model.task ?? model.model_type ?? model.type ?? task,
       provider: model.provider,
       capabilities: model.capabilities ?? [],
       enabled: model.is_active ?? true,
-      maintenance: model.is_maintenance ?? false,
+      maintenance: model.maintenance ?? model.is_maintenance ?? false,
       cost_per_unit: model.cost_per_unit,
       parameter_schema: model.paramSchema ?? model.param_schema ?? {},
     }));
@@ -309,7 +313,8 @@ interface CapabilitiesResponse {
 
 interface ModelsResponse {
   status?: string;
-  data?: Array<Record<string, unknown>>;
+  success?: boolean;
+  data?: Array<Record<string, unknown>> | { models?: Array<Record<string, unknown>> };
   providers?: Record<string, { models?: Array<Record<string, unknown>> }>;
 }
 
@@ -366,9 +371,16 @@ function pickResultUrl(response: TaskStatusResponse): string | undefined {
   return candidates.find((value): value is string => typeof value === "string" && value.length > 0);
 }
 
-async function downloadUrl(url: string, outDir: string): Promise<Record<string, unknown>> {
-  const parsedUrl = validateDownloadUrl(url);
-  const response = await fetch(parsedUrl);
+async function downloadUrl(
+  url: string,
+  outDir: string,
+  token: string | undefined,
+  apiBase: string,
+): Promise<Record<string, unknown>> {
+  const parsedUrl = validateDownloadUrl(url, apiBase);
+  const response = await fetch(parsedUrl, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
   if (!response.ok) {
     throw new Error(`Download failed: HTTP ${response.status}`);
   }
@@ -386,10 +398,10 @@ async function downloadUrl(url: string, outDir: string): Promise<Record<string, 
   };
 }
 
-function validateDownloadUrl(url: string): URL {
+function validateDownloadUrl(url: string, apiBase: string): URL {
   let parsed: URL;
   try {
-    parsed = new URL(url);
+    parsed = url.startsWith("/") ? new URL(url, new URL(apiBase).origin) : new URL(url);
   } catch {
     throw new Error("Download URL must be an absolute URL");
   }
@@ -399,7 +411,7 @@ function validateDownloadUrl(url: string): URL {
     throw new Error("Download URL must use https, except localhost development URLs");
   }
 
-  const allowedHosts = getAllowedDownloadHosts();
+  const allowedHosts = getAllowedDownloadHosts(apiBase);
   if (!isAllowedHost(parsed.hostname, allowedHosts)) {
     throw new Error(
       `Download host is not trusted: ${parsed.hostname}. Set MIRAIVFX_DOWNLOAD_HOSTS to add an approved host.`,
@@ -409,16 +421,22 @@ function validateDownloadUrl(url: string): URL {
   return parsed;
 }
 
-function getAllowedDownloadHosts(): string[] {
+function getAllowedDownloadHosts(apiBase: string): string[] {
   const configured = process.env.MIRAIVFX_DOWNLOAD_HOSTS?.split(",") ?? [];
-  return [
+  let apiHost: string | undefined;
+  try {
+    apiHost = new URL(apiBase).hostname;
+  } catch {
+    apiHost = undefined;
+  }
+  const hosts = [
     "miraivfx.art",
     "api.miraivfx.art",
     "cdn.miraivfx.art",
     ...configured,
-  ]
-    .map((host) => host.trim().toLowerCase())
-    .filter(Boolean);
+  ];
+  if (apiHost) hosts.push(apiHost);
+  return hosts.map((host) => host.trim().toLowerCase()).filter(Boolean);
 }
 
 function isAllowedHost(hostname: string, allowedHosts: string[]): boolean {

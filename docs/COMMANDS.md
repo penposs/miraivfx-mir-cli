@@ -37,6 +37,8 @@ mir-cli canvas models --task image --json
 mir-cli canvas models --task video --json
 ```
 
+`canvas models` reads the CLI-safe `/api/canvas/models` endpoint. It should not use the broader website `/api/models` registry because that response may contain internal routing fields used by the web app.
+
 ## Materials And Tasks
 
 ```powershell
@@ -46,7 +48,7 @@ mir-cli canvas download --task-id <task_id> --out runs/<run-id>/05-execution
 mir-cli canvas download --url <result_url> --out runs/<run-id>/05-execution
 ```
 
-`canvas download` only accepts trusted Miraivfx hosts by default and will not overwrite an existing local file. If production media is served from an additional signed CDN host, add it explicitly with `MIRAIVFX_DOWNLOAD_HOSTS=cdn.example.com,media.example.com`.
+`canvas download` sends the saved user bearer token when downloading protected Miraivfx API URLs, only accepts trusted Miraivfx hosts by default, and will not overwrite an existing local file. If production media is served from an additional signed CDN host, add it explicitly with `MIRAIVFX_DOWNLOAD_HOSTS=cdn.example.com,media.example.com`.
 
 ## Planning And Execution
 

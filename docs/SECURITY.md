@@ -16,6 +16,7 @@
 - `canvas open` only opens the website.
 - `canvas inspect --summary` returns metadata and node statistics.
 - `canvas inspect --json` returns full node parameters and should be called only when the user explicitly asks for it.
+- `canvas models` uses the CLI-safe `/api/canvas/models` endpoint, which omits internal endpoints, upstream model IDs, status endpoint patterns, base URL overrides, and API key pool fields.
 
 ## Mutations
 
@@ -23,6 +24,7 @@
 - Generation requires `--allow-generation`.
 - Uploading material requires `--allow-upload`.
 - Downloading results requires an explicit `--task-id` or `--url`.
+- Protected Miraivfx API downloads include the saved user bearer token.
 - Download URLs are restricted to trusted Miraivfx hosts by default. Extra approved hosts must be added through `MIRAIVFX_DOWNLOAD_HOSTS`.
 - Downloaded filenames are sanitized and existing files are not overwritten.
 - Before writing a canvas, the CLI must compare `revision` and `clientModifiedAt` to avoid overwriting browser-side changes.
