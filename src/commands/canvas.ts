@@ -129,7 +129,15 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       asJson ? json(result) : text(`Added image node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
-    text("Usage: mir-cli canvas node <add-image>");
+    if (action === "add-reference-image") {
+      const result = await addReferenceImageNode(api, rest, config.appBase);
+      if (result.opened && typeof result.url === "string") {
+        await openUrl(result.url);
+      }
+      asJson ? json(result) : text(`Added reference image node ${result.node_id} to ${result.canvas_id}`);
+      return;
+    }
+    text("Usage: mir-cli canvas node <add-image|add-reference-image>");
     return;
   }
 
@@ -298,6 +306,84 @@ async function addImageNode(api: ApiClient, args: string[], appBase: string): Pr
   };
 }
 
+async function addReferenceImageNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
+  if (!hasFlag(args, "--yes")) {
+    throw new Error("Creating a canvas node requires explicit --yes");
+  }
+  const shouldOpen = hasFlag(args, "--open");
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const imageUrl = requireValue(getFlagValue(args, "--url"), "--url");
+  validateCanvasAssetUrl(imageUrl);
+  const title = getFlagValue(args, "--title") ?? "参考图";
+  const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x") ?? -340;
+  const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y") ?? 0;
+  const connectTo = getFlagValue(args, "--connect-to");
+
+  const response = await api.getJson<GetCanvasResponse>(`/canvas/${encodeURIComponent(canvasId)}`);
+  if (!response.success || !response.data) {
+    throw new Error(response.error ?? "Canvas not found");
+  }
+  const canvas = response.data;
+  if (connectTo && !canvas.nodes.some((node) => isRecord(node) && node.id === connectTo)) {
+    throw new Error(`Cannot connect to missing node: ${connectTo}`);
+  }
+
+  const now = Date.now();
+  const node: CanvasNodeRecord = {
+    id: randomUUID(),
+    x,
+    y,
+    width: 280,
+    height: 280,
+    type: "image-item",
+    content: imageUrl,
+    title,
+    data: {
+      url: imageUrl,
+      kind: "image",
+      createdBy: "mir-cli",
+      createdAt: new Date(now).toISOString(),
+    },
+    status: "completed",
+  };
+  const connection = connectTo
+    ? {
+        id: randomUUID(),
+        fromNode: node.id,
+        toNode: connectTo,
+      }
+    : undefined;
+
+  const update = await api.putJson<UpdateCanvasResponse>(`/canvas/${encodeURIComponent(canvas.id)}`, {
+    nodes: [...(canvas.nodes ?? []), node],
+    connections: connection ? [...(canvas.connections ?? []), connection] : (canvas.connections ?? []),
+    clientHydrated: true,
+    clientModifiedAt: now,
+  });
+
+  if (!update.success) {
+    throw new Error(update.error ?? "Failed to update canvas");
+  }
+  if (update.data?.ignored) {
+    throw new Error("Canvas update was ignored because the server has a newer version. Re-inspect the canvas and retry.");
+  }
+
+  const url = `${appBase}/canvas?projectId=${encodeURIComponent(canvas.project_id)}&canvasId=${encodeURIComponent(canvas.id)}`;
+  return {
+    ok: true,
+    canvas_id: canvas.id,
+    project_id: canvas.project_id,
+    url,
+    opened: shouldOpen,
+    node_id: node.id,
+    node_type: node.type,
+    image_url: imageUrl,
+    connected_to: connectTo ?? null,
+    revision: update.data?.revision,
+    clientModifiedAt: update.data?.clientModifiedAt,
+  };
+}
+
 async function assertModelAvailable(api: ApiClient, task: string, modelId: string): Promise<void> {
   const response = await api.getJson<ModelsResponse>(`/canvas/models?task=${encodeURIComponent(task)}`);
   const models = normalizeModels(response, task);
@@ -350,6 +436,26 @@ function formatCanvasList(canvases: CanvasListItem[]): string {
 function requireValue(value: string | undefined, flag: string): string {
   if (!value) throw new Error(`Missing ${flag}`);
   return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function validateCanvasAssetUrl(value: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("--url must be an absolute URL");
+  }
+  const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (parsed.protocol !== "https:" && !(isLocalhost && parsed.protocol === "http:")) {
+    throw new Error("--url must use https, except localhost development URLs");
+  }
+  if (!isAllowedHost(parsed.hostname, getAllowedDownloadHosts("https://api.miraivfx.art/api")) && !isLocalhost) {
+    throw new Error(`Image URL host is not trusted: ${parsed.hostname}`);
+  }
 }
 
 function parseOptionalNumber(value: string | undefined, flag: string): number | undefined {
@@ -420,11 +526,11 @@ interface CanvasNodeRecord {
   y: number;
   width: number;
   height: number;
-  type: "image";
+  type: "image" | "image-item";
   content: string;
   title?: string;
   data: Record<string, unknown>;
-  status: "idle";
+  status: "idle" | "completed";
 }
 
 interface UpdateCanvasResponse {

@@ -35,9 +35,12 @@ mir-cli canvas inspect --canvas-id <canvas_id> --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --open --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --settings-json "{\"size\":\"1024x1024\"}" --yes --json
+mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_image_url> --connect-to <image_node_id> --yes --json
 ```
 
 `canvas node add-image` creates a saved `image` generation node using the existing Miraivfx canvas schema. It checks the selected model against `/api/canvas/models?task=image`, writes the node with `status=idle`, and does not start generation. Add `--open` to open the Miraivfx canvas page after the node is saved.
+
+`canvas node add-reference-image` creates a visible `image-item` node from an uploaded or trusted image URL. Use `--connect-to` when the reference image should feed a generation node on the canvas.
 
 ## Capabilities And Models
 
