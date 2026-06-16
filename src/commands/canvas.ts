@@ -125,6 +125,26 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       asJson ? json(result) : text(`Connected ${result.from_node} -> ${result.to_node} on ${result.canvas_id}`);
       return;
     }
+    if (action === "disconnect") {
+      const result = await disconnectCanvasNodes(api, rest, config.appBase);
+      asJson ? json(result) : text(`Disconnected nodes on ${result.canvas_id}`);
+      return;
+    }
+    if (action === "update") {
+      const result = await updateCanvasNode(api, rest, config.appBase);
+      asJson ? json(result) : text(`Updated node ${result.node_id} on ${result.canvas_id}`);
+      return;
+    }
+    if (action === "delete") {
+      const result = await deleteCanvasNode(api, rest, config.appBase);
+      asJson ? json(result) : text(`Deleted node ${result.node_id} on ${result.canvas_id}`);
+      return;
+    }
+    if (action === "clone") {
+      const result = await cloneCanvasNode(api, rest, config.appBase);
+      asJson ? json(result) : text(`Cloned node ${result.source_node_id} to ${result.node_id} on ${result.canvas_id}`);
+      return;
+    }
     if (action === "add-image") {
       const result = await addImageNode(api, rest, config.appBase);
       if (result.opened && typeof result.url === "string") {
@@ -150,7 +170,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       asJson ? json(result) : text(`Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
-    text("Usage: mir-cli canvas node <add|connect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d>");
+    text("Usage: mir-cli canvas node <add|update|clone|delete|connect|disconnect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d>");
     return;
   }
 
@@ -520,6 +540,146 @@ async function connectCanvasNodes(api: ApiClient, args: string[], appBase: strin
   };
 }
 
+async function disconnectCanvasNodes(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
+  if (!hasFlag(args, "--yes")) {
+    throw new Error("Removing a canvas connection requires explicit --yes");
+  }
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const fromNode = getFlagValue(args, "--from-node") ?? getFlagValue(args, "--from");
+  const toNode = getFlagValue(args, "--to-node") ?? getFlagValue(args, "--to");
+  const connectionId = getFlagValue(args, "--connection-id");
+  if (!connectionId && (!fromNode || !toNode)) {
+    throw new Error("Disconnect requires --connection-id or both --from-node and --to-node");
+  }
+  const canvas = await getCanvasData(api, canvasId);
+  const result = await applyCanvasOps(api, appBase, canvas, [
+    {
+      type: "disconnect",
+      ...(connectionId ? { connectionId } : {}),
+      ...(fromNode ? { fromNode } : {}),
+      ...(toNode ? { toNode } : {}),
+    },
+  ]);
+  return { ...result, connection_id: connectionId ?? null, from_node: fromNode ?? null, to_node: toNode ?? null };
+}
+
+async function updateCanvasNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
+  if (!hasFlag(args, "--yes")) {
+    throw new Error("Updating a canvas node requires explicit --yes");
+  }
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const nodeId = requireValue(getFlagValue(args, "--node-id") ?? getFlagValue(args, "--id"), "--node-id");
+  const canvas = await getCanvasData(api, canvasId);
+  const node = findCanvasNode(canvas, nodeId);
+  const patch: Record<string, unknown> = {};
+  const title = getFlagValue(args, "--title");
+  const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt");
+  const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
+  const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
+  const width = parseOptionalNumber(getFlagValue(args, "--width"), "--width");
+  const height = parseOptionalNumber(getFlagValue(args, "--height"), "--height");
+  const dataJson = parseSettings(getFlagValue(args, "--data-json"));
+  const settings = parseSettings(getFlagValue(args, "--settings-json"));
+  const model = getFlagValue(args, "--model");
+
+  if (title !== undefined) patch.title = title;
+  if (content !== undefined) patch.content = content;
+  if (x !== undefined) patch.x = x;
+  if (y !== undefined) patch.y = y;
+  if (width !== undefined) patch.width = width;
+  if (height !== undefined) patch.height = height;
+
+  const nodeType = String((node as any).type || "");
+  if (model) {
+    const modelTask = modelTaskForNode(nodeType);
+    if (modelTask) await assertModelAvailable(api, modelTask, model);
+  }
+  const dataPatch = {
+    ...(dataJson ?? {}),
+    ...(settings ? { settings } : {}),
+    ...(content !== undefined && !MATERIAL_NODE_TYPES.has(nodeType) ? { prompt: content } : {}),
+    ...(model ? modelDataForNode(nodeType, model) : {}),
+    updatedBy: "mir-cli",
+    updatedAt: new Date().toISOString(),
+  };
+  if (Object.keys(dataPatch).length > 2 || dataJson || settings || model || content !== undefined) {
+    patch.data = dataPatch;
+  }
+  if (!Object.keys(patch).length) {
+    throw new Error("No update fields provided");
+  }
+
+  const result = await applyCanvasOps(api, appBase, canvas, [{ type: "update_node", nodeId, patch }]);
+  return { ...result, node_id: nodeId, patch };
+}
+
+async function deleteCanvasNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
+  if (!hasFlag(args, "--yes")) {
+    throw new Error("Deleting a canvas node requires explicit --yes");
+  }
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const nodeId = requireValue(getFlagValue(args, "--node-id") ?? getFlagValue(args, "--id"), "--node-id");
+  const canvas = await getCanvasData(api, canvasId);
+  findCanvasNode(canvas, nodeId);
+  const result = await applyCanvasOps(api, appBase, canvas, [{ type: "delete_node", nodeId }]);
+  return { ...result, node_id: nodeId };
+}
+
+async function cloneCanvasNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
+  if (!hasFlag(args, "--yes")) {
+    throw new Error("Cloning a canvas node requires explicit --yes");
+  }
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const sourceNodeId = requireValue(getFlagValue(args, "--node-id") ?? getFlagValue(args, "--source-node"), "--node-id");
+  const canvas = await getCanvasData(api, canvasId);
+  const source = findCanvasNode(canvas, sourceNodeId) as unknown as CanvasNodeRecord;
+  const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x") ?? (Number(source.x || 0) + 460);
+  const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y") ?? Number(source.y || 0);
+  const title = getFlagValue(args, "--title") ?? `${String(source.title || source.type || "Node")} v2`;
+  const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt") ?? String(source.content || "");
+  const dataJson = parseSettings(getFlagValue(args, "--data-json")) ?? {};
+  const settings = parseSettings(getFlagValue(args, "--settings-json"));
+  const clonedNode: CanvasNodeRecord = {
+    id: randomUUID(),
+    x,
+    y,
+    width: Number(source.width || defaultShapeForNode(String(source.type)).width),
+    height: Number(source.height || defaultShapeForNode(String(source.type)).height),
+    type: String(source.type),
+    content,
+    title,
+    data: {
+      ...(typeof source.data === "object" && source.data ? source.data : {}),
+      ...dataJson,
+      ...(settings ? { settings } : {}),
+      ...(content && !MATERIAL_NODE_TYPES.has(String(source.type)) ? { prompt: content } : {}),
+      clonedFrom: sourceNodeId,
+      createdBy: "mir-cli",
+      createdAt: new Date().toISOString(),
+    },
+    status: defaultStatusForNode(String(source.type), content),
+  };
+  const ops: Array<Record<string, unknown>> = [{ type: "add_node", node: clonedNode }];
+  if (hasFlag(args, "--copy-inputs")) {
+    for (const connection of canvas.connections ?? []) {
+      if (
+        connection &&
+        typeof connection === "object" &&
+        String((connection as any).toNode || "") === sourceNodeId
+      ) {
+        ops.push({
+          type: "connect",
+          id: randomUUID(),
+          fromNode: String((connection as any).fromNode),
+          toNode: clonedNode.id,
+        });
+      }
+    }
+  }
+  const result = await applyCanvasOps(api, appBase, canvas, ops);
+  return { ...result, source_node_id: sourceNodeId, node_id: clonedNode.id, node_type: clonedNode.type };
+}
+
 async function addReferenceImageNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
   if (!hasFlag(args, "--yes")) {
     throw new Error("Creating a canvas node requires explicit --yes");
@@ -590,6 +750,62 @@ async function addReferenceImageNode(api: ApiClient, args: string[], appBase: st
     connected_to: connectTo ?? null,
     revision: update.data?.revision,
     clientModifiedAt: update.data?.clientModifiedAt,
+  };
+}
+
+async function getCanvasData(api: ApiClient, canvasId: string): Promise<CanvasData> {
+  const response = await api.getJson<GetCanvasResponse>(`/canvas/${encodeURIComponent(canvasId)}`);
+  if (!response.success || !response.data) {
+    throw new Error(response.error ?? "Canvas not found");
+  }
+  return response.data;
+}
+
+function findCanvasNode(canvas: CanvasData, nodeId: string): Record<string, unknown> {
+  const node = (canvas.nodes ?? []).find(
+    (item) => item && typeof item === "object" && String((item as any).id || "") === nodeId,
+  );
+  if (!node || typeof node !== "object") {
+    throw new Error(`Node not found: ${nodeId}`);
+  }
+  return node as Record<string, unknown>;
+}
+
+async function applyCanvasOps(
+  api: ApiClient,
+  appBase: string,
+  canvas: CanvasData,
+  ops: Array<Record<string, unknown>>,
+): Promise<Record<string, unknown>> {
+  const now = Date.now();
+  const update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvas.id)}/ops`, {
+    conflictPolicy: "strict",
+    baseRevision: canvas.revision ?? 0,
+    clientModifiedAt: now,
+    ops,
+  });
+
+  if (!update.success) {
+    throw new Error(update.error ?? "Failed to apply canvas ops");
+  }
+  if (update.data?.ignored) {
+    throw new Error("Canvas changed after inspection. Re-inspect the canvas and retry.");
+  }
+
+  const projectId = requireValue(update.data?.project_id, "ops response project_id");
+  const url = `${appBase}/canvas?projectId=${encodeURIComponent(projectId)}&canvasId=${encodeURIComponent(canvas.id)}`;
+  return {
+    ok: true,
+    canvas_id: canvas.id,
+    project_id: projectId,
+    url,
+    revision: update.data?.revision,
+    clientModifiedAt: update.data?.clientModifiedAt,
+    created_nodes: update.data?.nodes ?? [],
+    created_connections: update.data?.connections ?? [],
+    updated_nodes: update.data?.updated_nodes ?? [],
+    deleted_node_ids: update.data?.deleted_node_ids ?? [],
+    deleted_connection_ids: update.data?.deleted_connection_ids ?? [],
   };
 }
 
@@ -871,6 +1087,9 @@ interface CanvasOpsResponse {
     name?: string;
     nodes?: Array<Record<string, unknown>>;
     connections?: Array<Record<string, unknown>>;
+    updated_nodes?: Array<Record<string, unknown>>;
+    deleted_node_ids?: string[];
+    deleted_connection_ids?: string[];
   };
   error?: string;
 }

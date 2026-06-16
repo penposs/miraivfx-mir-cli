@@ -20,7 +20,10 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 7. Use `mir-cli canvas upload --allow-upload` only when the user explicitly asked to upload a local asset.
 8. Use `mir-cli canvas node add --type <node-type> ... --yes` only to append allowed nodes and connections. Read `mir-cli canvas capabilities --json` for supported node types.
 9. Use `mir-cli canvas node connect --from-node <asset_node_id> --to-node <generation_node_id> --yes` to reuse an existing asset node across multiple generation nodes.
-10. Open the canvas for the user to manually submit generation, inspect task status, and download results.
+10. For second versions or creative iteration, prefer `mir-cli canvas node clone --copy-inputs --yes` unless the user explicitly asks to edit the original node.
+11. Use `mir-cli canvas node update --node-id <node_id> ... --yes` only after inspecting the canvas and identifying the exact node id.
+12. Use `mir-cli canvas node delete --node-id <node_id> --yes` only for exact user-confirmed node ids.
+13. Open the canvas for the user to review and run generation in Miraivfx.
 
 ## Canvas Layout And Asset Reuse Rules
 
@@ -35,8 +38,7 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 
 - Do not ask for the user's password.
 - Do not ask the user to paste tokens.
-- Do not read browser localStorage.
-- Do not access the database directly.
 - Do not trigger generation, retry tasks, poll task status, or download results from the CLI.
-- Do not write task IDs, result URLs, billing fields, API keys, endpoints, admin flags, or completed statuses for generation/action nodes.
+- Do not control anything outside the user's Miraivfx canvas workflow.
+- Do not write hidden system fields or completed statuses for generation/action nodes.
 - Preserve run directories and execution logs.

@@ -1,8 +1,8 @@
 # Miraivfx MIR CLI
 
-`mir-cli` is an agent-friendly command line interface for Miraivfx projects, canvases, model discovery, uploads, and safe canvas node creation.
+`mir-cli` lets AI assistants such as Codex, Claude, and Cursor Agent help users organize Miraivfx projects and canvases from the command line.
 
-The primary users are Codex, Claude, Cursor Agent, and similar tools. The CLI exposes stable commands and machine-readable JSON so agents can help users list projects, open canvases, inspect canvas summaries, create plans, and execute confirmed canvas changes.
+Use it to create projects, create canvases, upload assets, read available models, add canvas nodes, connect assets to generation nodes, and keep creative workflows tidy. The CLI is designed for agent-assisted canvas setup and iteration. Users still review the canvas in Miraivfx before running generation.
 
 ## Install
 
@@ -16,60 +16,71 @@ Or run without installing:
 npx @miraivfx/mir-cli --help
 ```
 
-## Typical Flow
+## Quick Start
 
 ```powershell
 mir-cli auth status
 mir-cli auth login
 mir-cli project list --json
 mir-cli canvas list --project-id <project_id> --json
+mir-cli canvas create --project-id <project_id> --name "Storyboard" --json
 mir-cli canvas open --canvas-id <canvas_id>
+```
+
+## Common Canvas Actions
+
+```powershell
 mir-cli canvas capabilities --json
-mir-cli canvas models --task image --json
+mir-cli canvas models --task video --json
 mir-cli canvas inspect --canvas-id <canvas_id> --summary
-mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Planning note" --yes --json
-mir-cli canvas node add --canvas-id <canvas_id> --type video --prompt "A cinematic shot" --model <model_id> --yes --json
-mir-cli canvas node add --canvas-id <canvas_id> --type suno --prompt "Song idea" --data-json "{\"sunoMode\":\"description\"}" --yes --json
-mir-cli canvas node connect --canvas-id <canvas_id> --from-node <asset_node_id> --to-node <generation_node_id> --yes --json
-mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --open --json
-mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_image_url> --connect-to <node_id> --yes --json
-mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
-```
-
-During the first API integration phase, configure local API settings with environment variables:
-
-```powershell
-$env:MIRAIVFX_API_BASE = "https://api.miraivfx.art/api"
-$env:MIRAIVFX_APP_BASE = "https://miraivfx.art"
-$env:MIRAIVFX_LOGTO_ENDPOINT = "https://auth.miraivfx.art"
-$env:MIRAIVFX_LOGTO_APP_ID = "kdj75szqjfbqcn6pzbtzu"
-$env:MIRAIVFX_AUTH_REDIRECT_URI = "http://127.0.0.1:39173/callback"
-```
-
-`mir-cli auth login` uses browser OAuth/PKCE. The default Logto app id is the dedicated `Miraivfx MIR CLI` single-page app. It allows the localhost redirect URI above. `MIRAIVFX_TOKEN` remains a local development bridge only; do not paste tokens into agent chats and do not commit them.
-
-Full node parameters require an explicit command:
-
-```powershell
 mir-cli canvas inspect --canvas-id <canvas_id> --json
 ```
 
-## Safety Rules
+Add nodes and connect references:
 
-- The CLI must not ask for user passwords.
-- The CLI must not ask users to paste tokens into agent chats.
-- The CLI must not read browser localStorage.
-- The CLI must not access the database directly.
-- Summary commands should be used before full node inspection.
-- Uploads require `--allow-upload`.
-- Mutations require explicit confirmation flags such as `--yes`.
-- Canvas node mutations use backend ops and append to the current server canvas instead of replacing the whole canvas.
-- `canvas node add --type <node-type>` supports the Miraivfx canvas node types exposed by `canvas capabilities`; action/generation nodes are created as idle canvas nodes only.
-- For multi-node canvas setup, upload and place each unique asset once, then connect the shared asset node to every generation node that needs it. Do not create duplicate asset nodes for every shot in the same operation.
-- Use a readable lane layout: shared assets on the left, generation/action nodes on the right in timeline order, with enough space between groups for future result nodes.
-- Generation submission, task status, and result downloads are intentionally web-only in the first release.
-- Project and canvas access must be enforced by the Miraivfx backend.
+```powershell
+mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Planning note" --yes --json
+mir-cli canvas node add --canvas-id <canvas_id> --type seedance2-rh-standard --prompt "Video prompt" --data-json "{\"ratio\":\"16:9\",\"duration\":\"12\"}" --yes --json
+mir-cli canvas upload --project-id <project_id> --file ./character.png --allow-upload --json
+mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_image_url> --yes --json
+mir-cli canvas node connect --canvas-id <canvas_id> --from-node <asset_node_id> --to-node <generation_node_id> --yes --json
+```
 
-## Repository Status
+Iterate on existing work:
 
-This repository contains the first API-backed CLI implementation. Safe canvas node creation is available behind explicit confirmation; generation submission, task polling, and downloads remain manual actions in the Miraivfx web app.
+```powershell
+mir-cli canvas node update --canvas-id <canvas_id> --node-id <node_id> --prompt "Updated prompt" --yes --json
+mir-cli canvas node clone --canvas-id <canvas_id> --node-id <node_id> --copy-inputs --title "Shot 03 v2" --yes --json
+mir-cli canvas node disconnect --canvas-id <canvas_id> --from-node <asset_node_id> --to-node <generation_node_id> --yes --json
+mir-cli canvas node delete --canvas-id <canvas_id> --node-id <node_id> --yes --json
+```
+
+## Agent Workflow
+
+A good agent flow is:
+
+1. Confirm the user is logged in.
+2. List or create the target project and canvas.
+3. Inspect the canvas before editing existing nodes.
+4. Read current model and node capabilities.
+5. Upload each unique local asset once.
+6. Place shared assets on the left side of the canvas.
+7. Place generation or action nodes on the right side in workflow order.
+8. Reuse assets by connecting the same asset node to multiple generation nodes.
+9. Prefer cloning a node for a new version unless the user explicitly asks to overwrite the original.
+10. Open the Miraivfx canvas so the user can review and run generation manually.
+
+## Safety And Control
+
+- The user logs in through the browser.
+- Commands that change the canvas require explicit flags such as `--yes` or `--allow-upload`.
+- The CLI edits canvases with small operations instead of replacing the whole canvas.
+- Generation submission, task polling, and result downloads are handled in the Miraivfx web app.
+- Agents should not ask users for passwords or raw tokens.
+- Agents should inspect the current canvas before editing existing nodes.
+
+## More Documentation
+
+- `docs/COMMANDS.md`: command reference.
+- `docs/SECURITY.md`: user-facing safety model.
+- `skills/miraivfx-mir-cli/SKILL.md`: agent operating rules.
