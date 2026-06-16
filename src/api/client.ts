@@ -31,6 +31,18 @@ export class ApiClient {
     return (await response.json()) as T;
   }
 
+  async postForm<T>(path: string, form: FormData): Promise<T> {
+    const response = await fetch(`${this.options.baseUrl}${path}`, {
+      method: "POST",
+      headers: this.headers(),
+      body: form,
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: HTTP ${response.status}`);
+    }
+    return (await response.json()) as T;
+  }
+
   private headers(): Record<string, string> {
     return this.options.token
       ? { Authorization: `Bearer ${this.options.token}` }

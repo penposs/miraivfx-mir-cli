@@ -1,5 +1,6 @@
 import { json, text } from "../core/output.js";
 import { loadRuntimeConfig } from "../core/config.js";
+import { openUrl } from "../core/open.js";
 
 export async function handleAuthCommand(subcommand = "", args: string[]): Promise<void> {
   const asJson = args.includes("--json");
@@ -22,12 +23,16 @@ export async function handleAuthCommand(subcommand = "", args: string[]): Promis
   }
 
   if (subcommand === "login") {
+    const config = await loadRuntimeConfig();
+    const loginUrl = `${config.appBase}/login`;
+    await openUrl(loginUrl);
     const payload = {
-      ok: false,
-      reason: "auth_login_not_implemented",
-      security: "Login must use browser OAuth/PKCE. Do not paste tokens into agent chats.",
+      ok: true,
+      opened: loginUrl,
+      next: "After browser OAuth/PKCE is implemented, this command will capture the authorization callback locally.",
+      security: "Do not paste passwords or tokens into agent chats.",
     };
-    asJson ? json(payload) : text("Browser login flow is planned but not implemented yet.");
+    asJson ? json(payload) : text(`Opened ${loginUrl}`);
     return;
   }
 

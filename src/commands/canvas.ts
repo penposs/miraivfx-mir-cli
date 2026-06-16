@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { getFlagValue, hasFlag } from "../core/args.js";
 import { ApiClient } from "../api/client.js";
 import { loadRuntimeConfig } from "../core/config.js";
@@ -71,7 +73,50 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
     return;
   }
 
-  if (["upload", "plan", "deploy", "run", "status", "download"].includes(subcommand)) {
+  if (subcommand === "upload") {
+    if (!hasFlag(args, "--allow-upload")) {
+      throw new Error("Upload requires explicit --allow-upload");
+    }
+    const filePath = requireValue(getFlagValue(args, "--file"), "--file");
+    const form = new FormData();
+    const fileBuffer = await import("node:fs/promises").then((fs) => fs.readFile(filePath));
+    form.set("file", new Blob([fileBuffer]), basename(filePath));
+    const projectId = getFlagValue(args, "--project-id");
+    if (projectId) form.set("project_id", projectId);
+    const response = await api.postForm<UploadResponse>("/files/upload", form);
+    json({
+      filename: response.filename,
+      original_filename: response.original_filename,
+      url: response.url,
+      path: response.path,
+      size: response.size,
+      project_id: response.project_id,
+      converted_to_jpg: response.converted_to_jpg,
+    });
+    return;
+  }
+
+  if (subcommand === "status") {
+    const taskId = requireValue(getFlagValue(args, "--task-id"), "--task-id");
+    const response = await api.getJson<TaskStatusResponse>(`/tasks/${encodeURIComponent(taskId)}`);
+    json(normalizeTaskStatus(taskId, response));
+    return;
+  }
+
+  if (subcommand === "download") {
+    const outDir = getFlagValue(args, "--out") ?? ".";
+    const explicitUrl = getFlagValue(args, "--url");
+    const taskId = getFlagValue(args, "--task-id");
+    const url = explicitUrl ?? (taskId ? await resolveTaskResultUrl(api, taskId) : undefined);
+    if (!url) {
+      throw new Error("Missing --url or a --task-id with downloadable result");
+    }
+    const result = await downloadUrl(url, outDir);
+    json(result);
+    return;
+  }
+
+  if (["plan", "deploy", "run"].includes(subcommand)) {
     const payload = {
       ok: false,
       command: `canvas ${subcommand}`,
@@ -266,4 +311,89 @@ interface ModelsResponse {
   status?: string;
   data?: Array<Record<string, unknown>>;
   providers?: Record<string, { models?: Array<Record<string, unknown>> }>;
+}
+
+interface UploadResponse {
+  filename: string;
+  original_filename?: string;
+  url: string;
+  path: string;
+  size: number;
+  project_id?: string | null;
+  converted_to_jpg?: boolean;
+}
+
+interface TaskStatusResponse {
+  task?: Record<string, unknown>;
+  history_record?: Record<string, unknown> | null;
+  status?: string;
+  data?: unknown;
+}
+
+function normalizeTaskStatus(taskId: string, response: TaskStatusResponse): Record<string, unknown> {
+  const task = response.task ?? {};
+  const record = response.history_record ?? null;
+  return {
+    task_id: String(task.task_id ?? taskId),
+    status: String(task.status ?? record?.status ?? response.status ?? "unknown"),
+    progress: task.progress,
+    result: task.result,
+    result_url: pickResultUrl(response),
+    error: task.error ?? record?.error ?? record?.error_message ?? null,
+    history_record: record,
+  };
+}
+
+async function resolveTaskResultUrl(api: ApiClient, taskId: string): Promise<string | undefined> {
+  const response = await api.getJson<TaskStatusResponse>(`/tasks/${encodeURIComponent(taskId)}`);
+  return pickResultUrl(response);
+}
+
+function pickResultUrl(response: TaskStatusResponse): string | undefined {
+  const task = response.task ?? {};
+  const record = response.history_record ?? {};
+  const result = task.result as Record<string, unknown> | undefined;
+  const candidates = [
+    record.result_url,
+    record.imageUrl,
+    record.video_url,
+    record.image_url,
+    result?.url,
+    result?.imageUrl,
+    result?.video_url,
+    result?.image_url,
+  ];
+  return candidates.find((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+async function downloadUrl(url: string, outDir: string): Promise<Record<string, unknown>> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Download failed: HTTP ${response.status}`);
+  }
+  await mkdir(outDir, { recursive: true });
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const filename = getDownloadFilename(url, response.headers.get("content-disposition"));
+  const outputPath = join(outDir, filename);
+  await writeFile(outputPath, bytes);
+  return {
+    ok: true,
+    url,
+    output_path: outputPath,
+    filename,
+    size: bytes.byteLength,
+  };
+}
+
+function getDownloadFilename(url: string, contentDisposition: string | null): string {
+  const match = contentDisposition?.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+  const headerName = match?.[1] ?? match?.[2];
+  if (headerName) return decodeURIComponent(headerName);
+  try {
+    const parsed = new URL(url);
+    const name = basename(parsed.pathname);
+    return name || "download.bin";
+  } catch {
+    return "download.bin";
+  }
 }

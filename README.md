@@ -27,6 +27,9 @@ mir-cli canvas open --canvas-id <canvas_id>
 mir-cli canvas capabilities --json
 mir-cli canvas models --task image --json
 mir-cli canvas inspect --canvas-id <canvas_id> --summary
+mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
+mir-cli canvas status --task-id <task_id> --json
+mir-cli canvas download --task-id <task_id> --out ./downloads
 ```
 
 During the first API integration phase, configure local API settings with environment variables:
@@ -52,6 +55,7 @@ mir-cli canvas inspect --canvas-id <canvas_id> --json
 - The CLI must not read browser localStorage.
 - The CLI must not access the database directly.
 - Summary commands should be used before full node inspection.
+- Uploads require `--allow-upload`.
 - Mutations require explicit confirmation flags such as `--yes` or `--allow-generation`.
 - Project and canvas access must be enforced by the Miraivfx backend.
 

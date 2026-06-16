@@ -22,6 +22,7 @@
 - Creating or updating canvas nodes requires explicit confirmation.
 - Generation requires `--allow-generation`.
 - Uploading material requires `--allow-upload`.
+- Downloading results requires an explicit `--task-id` or `--url`.
 - Before writing a canvas, the CLI must compare `revision` and `clientModifiedAt` to avoid overwriting browser-side changes.
 
 ## Backend Responsibilities

@@ -43,6 +43,7 @@ mir-cli canvas models --task video --json
 mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
 mir-cli canvas status --task-id <task_id> --json
 mir-cli canvas download --task-id <task_id> --out runs/<run-id>/05-execution
+mir-cli canvas download --url <result_url> --out runs/<run-id>/05-execution
 ```
 
 ## Planning And Execution
