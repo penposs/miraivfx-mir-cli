@@ -27,6 +27,9 @@ mir-cli canvas open --canvas-id <canvas_id>
 mir-cli canvas capabilities --json
 mir-cli canvas models --task image --json
 mir-cli canvas inspect --canvas-id <canvas_id> --summary
+mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Planning note" --yes --json
+mir-cli canvas node add --canvas-id <canvas_id> --type video --prompt "A cinematic shot" --model <model_id> --yes --json
+mir-cli canvas node add --canvas-id <canvas_id> --type suno --prompt "Song idea" --data-json "{\"sunoMode\":\"description\"}" --yes --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --open --json
 mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_image_url> --connect-to <node_id> --yes --json
 mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
@@ -60,6 +63,7 @@ mir-cli canvas inspect --canvas-id <canvas_id> --json
 - Uploads require `--allow-upload`.
 - Mutations require explicit confirmation flags such as `--yes`.
 - Canvas node mutations use backend ops and append to the current server canvas instead of replacing the whole canvas.
+- `canvas node add --type <node-type>` supports the Miraivfx canvas node types exposed by `canvas capabilities`; action/generation nodes are created as idle canvas nodes only.
 - Generation submission, task status, and result downloads are intentionally web-only in the first release.
 - Project and canvas access must be enforced by the Miraivfx backend.
 

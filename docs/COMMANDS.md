@@ -32,11 +32,19 @@ mir-cli canvas inspect --canvas-id <canvas_id> --json
 ## Canvas Node Mutations
 
 ```powershell
+mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Planning note" --yes --json
+mir-cli canvas node add --canvas-id <canvas_id> --type video --prompt "A cinematic shot" --model <model_id> --yes --json
+mir-cli canvas node add --canvas-id <canvas_id> --type suno --prompt "Song idea" --data-json "{\"sunoMode\":\"description\"}" --yes --json
+mir-cli canvas node add --canvas-id <canvas_id> --type seedance2-rh-standard --prompt "Video prompt" --data-json "{\"ratio\":\"16:9\",\"duration\":\"5\"}" --yes --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --yes --open --json
 mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "A product photo" --model <model_id> --settings-json "{\"size\":\"1024x1024\"}" --yes --json
 mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_image_url> --connect-to <image_node_id> --yes --json
 ```
+
+`canvas node add --type <node-type>` is the generic safe node creation command. Supported types come from `mir-cli canvas capabilities --json` and currently cover the Miraivfx canvas `NodeType` set, including sidebar nodes such as `image`, `image-item`, `video`, `pro-camera`, `text`, `agent`, `suno`, `seedance`, `seedance-volc`, `seedance2-rh-standard`, `runninghub`, `panorama-gen`, and `blocking-3d`.
+
+Common aliases are also available: `add-text`, `add-video`, `add-audio`, `add-video-reference`, `add-agent`, `add-suno`, `add-seedance`, `add-seedance-volc`, `add-seedance-rh`, `add-runninghub`, `add-pro-camera`, `add-panorama-gen`, `add-blocking-3d`, `add-drawing-board`, `add-frame-extractor`, `add-upscale`, `add-resize`, `add-smart-split`, `add-panorama-split`, and `add-relay`.
 
 `canvas node add-image` creates a saved `image` generation node using the existing Miraivfx canvas schema. It checks the selected model against `/api/canvas/models?task=image`, writes the node with `status=idle`, and does not start generation. Add `--open` to open the Miraivfx canvas page after the node is saved.
 

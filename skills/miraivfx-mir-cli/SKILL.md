@@ -18,7 +18,7 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
    - `mir-cli canvas models --task video --json`
 6. Show a concise plan and risk summary before any mutation.
 7. Use `mir-cli canvas upload --allow-upload` only when the user explicitly asked to upload a local asset.
-8. Use `mir-cli canvas node ... --yes` only to append allowed nodes and connections.
+8. Use `mir-cli canvas node add --type <node-type> ... --yes` only to append allowed nodes and connections. Read `mir-cli canvas capabilities --json` for supported node types.
 9. Open the canvas for the user to manually submit generation, inspect task status, and download results.
 
 ## Safety Rules
@@ -28,4 +28,5 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 - Do not read browser localStorage.
 - Do not access the database directly.
 - Do not trigger generation, retry tasks, poll task status, or download results from the CLI.
+- Do not write task IDs, result URLs, billing fields, API keys, endpoints, admin flags, or completed statuses for generation/action nodes.
 - Preserve run directories and execution logs.

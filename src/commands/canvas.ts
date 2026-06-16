@@ -112,6 +112,14 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
   if (subcommand === "node") {
     const action = args[0] ?? "";
     const rest = args.slice(1);
+    if (action === "add") {
+      const result = await addGenericNode(api, rest, config.appBase);
+      if (result.opened && typeof result.url === "string") {
+        await openUrl(result.url);
+      }
+      asJson ? json(result) : text(`Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
+      return;
+    }
     if (action === "add-image") {
       const result = await addImageNode(api, rest, config.appBase);
       if (result.opened && typeof result.url === "string") {
@@ -128,7 +136,16 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       asJson ? json(result) : text(`Added reference image node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
-    text("Usage: mir-cli canvas node <add-image|add-reference-image>");
+    const aliasType = NODE_ACTION_ALIASES[action];
+    if (aliasType) {
+      const result = await addGenericNode(api, [`--type`, aliasType, ...rest], config.appBase);
+      if (result.opened && typeof result.url === "string") {
+        await openUrl(result.url);
+      }
+      asJson ? json(result) : text(`Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
+      return;
+    }
+    text("Usage: mir-cli canvas node <add|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d>");
     return;
   }
 
@@ -140,6 +157,66 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
 
   text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|node>");
 }
+
+const CANVAS_NODE_TYPES = new Set([
+  "text",
+  "image-item",
+  "video-item",
+  "image",
+  "video",
+  "seedance-volc",
+  "seedance2-rh-standard",
+  "frame-extractor",
+  "llm",
+  "agent",
+  "seedance",
+  "suno",
+  "relay",
+  "upscale",
+  "runninghub",
+  "seedance2-runninghub",
+  "sora2-runninghub",
+  "rh-config",
+  "rh-param",
+  "rh-main",
+  "drawing-board",
+  "pro-camera",
+  "smart-split",
+  "panorama-split",
+  "panorama-gen",
+  "blocking-3d",
+  "audio",
+  "file",
+  "resize",
+]);
+
+const MATERIAL_NODE_TYPES = new Set(["image-item", "video-item", "audio", "file", "text"]);
+
+const NODE_ACTION_ALIASES: Record<string, string> = {
+  "add-text": "text",
+  "add-video": "video",
+  "add-audio": "audio",
+  "add-video-reference": "video-item",
+  "add-audio-reference": "audio",
+  "add-file": "file",
+  "add-agent": "agent",
+  "add-llm": "llm",
+  "add-suno": "suno",
+  "add-seedance": "seedance",
+  "add-seedance-volc": "seedance-volc",
+  "add-seedance-rh": "seedance2-rh-standard",
+  "add-runninghub": "runninghub",
+  "add-pro-camera": "pro-camera",
+  "add-panorama-gen": "panorama-gen",
+  "add-blocking-3d": "blocking-3d",
+  "add-drawing-board": "drawing-board",
+  "add-frame-extractor": "frame-extractor",
+  "add-upscale": "upscale",
+  "add-resize": "resize",
+  "add-smart-split": "smart-split",
+  "add-panorama-split": "panorama-split",
+  "add-relay": "relay",
+};
 
 function manualWebOnlyPayload(command: string): { ok: false; command: string; code: string; message: string } {
   return {
@@ -225,6 +302,104 @@ function summarizeCanvas(canvas: CanvasData): Record<string, unknown> {
     revision: canvas.revision ?? 0,
     clientModifiedAt: canvas.clientModifiedAt ?? 0,
     updatedAt: canvas.updatedAt,
+  };
+}
+
+async function addGenericNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
+  if (!hasFlag(args, "--yes")) {
+    throw new Error("Creating a canvas node requires explicit --yes");
+  }
+  const shouldOpen = hasFlag(args, "--open");
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const nodeType = requireValue(getFlagValue(args, "--type"), "--type");
+  if (!CANVAS_NODE_TYPES.has(nodeType)) {
+    throw new Error(`Unsupported node type: ${nodeType}`);
+  }
+  const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt") ?? "";
+  const title = getFlagValue(args, "--title") ?? defaultTitleForNode(nodeType);
+  const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x") ?? 0;
+  const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y") ?? 0;
+  const shape = defaultShapeForNode(nodeType);
+  const width = parseOptionalNumber(getFlagValue(args, "--width"), "--width") ?? shape.width;
+  const height = parseOptionalNumber(getFlagValue(args, "--height"), "--height") ?? shape.height;
+  const status = getFlagValue(args, "--status") ?? defaultStatusForNode(nodeType, content);
+  const model = getFlagValue(args, "--model");
+  const dataJson = parseSettings(getFlagValue(args, "--data-json")) ?? {};
+  const settings = parseSettings(getFlagValue(args, "--settings-json"));
+  const connectTo = getFlagValue(args, "--connect-to");
+
+  if (model) {
+    const modelTask = modelTaskForNode(nodeType);
+    if (modelTask) await assertModelAvailable(api, modelTask, model);
+  }
+
+  if (content && MATERIAL_NODE_TYPES.has(nodeType) && looksLikeUrl(content)) {
+    validateCanvasAssetUrl(content);
+  }
+
+  const now = Date.now();
+  const node: CanvasNodeRecord = {
+    id: randomUUID(),
+    x,
+    y,
+    width,
+    height,
+    type: nodeType,
+    content,
+    title,
+    data: {
+      ...defaultDataForNode(nodeType),
+      ...dataJson,
+      ...(settings ? { settings } : {}),
+      ...(content && !MATERIAL_NODE_TYPES.has(nodeType) ? { prompt: content } : {}),
+      ...(content && MATERIAL_NODE_TYPES.has(nodeType) && looksLikeUrl(content) ? materialDataForNode(nodeType, content) : {}),
+      ...(model ? modelDataForNode(nodeType, model) : {}),
+      createdBy: "mir-cli",
+      createdAt: new Date(now).toISOString(),
+    },
+    status,
+  };
+  const connection = connectTo
+    ? {
+        type: "connect",
+        id: randomUUID(),
+        fromNode: node.id,
+        toNode: connectTo,
+      }
+    : undefined;
+
+  const update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
+    conflictPolicy: "merge",
+    clientModifiedAt: now,
+    ops: [
+      { type: "add_node", node },
+      ...(connection ? [connection] : []),
+    ],
+  });
+
+  if (!update.success) {
+    throw new Error(update.error ?? "Failed to apply canvas ops");
+  }
+  if (update.data?.ignored) {
+    throw new Error("Canvas update was ignored because the server has a newer version. Re-inspect the canvas and retry.");
+  }
+
+  const projectId = requireValue(update.data?.project_id, "ops response project_id");
+  const url = `${appBase}/canvas?projectId=${encodeURIComponent(projectId)}&canvasId=${encodeURIComponent(canvasId)}`;
+  return {
+    ok: true,
+    canvas_id: canvasId,
+    project_id: projectId,
+    url,
+    opened: shouldOpen,
+    node_id: node.id,
+    node_type: node.type,
+    title,
+    status,
+    connected_to: connectTo ?? null,
+    revision: update.data?.revision,
+    clientModifiedAt: update.data?.clientModifiedAt,
+    generation_started: false,
   };
 }
 
@@ -440,6 +615,128 @@ function validateCanvasAssetUrl(value: string): void {
   }
 }
 
+function looksLikeUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function defaultShapeForNode(type: string): { width: number; height: number } {
+  if (type === "relay") return { width: 50, height: 50 };
+  if (type === "text" || type === "llm" || type === "agent" || type === "seedance") {
+    return { width: 320, height: type === "agent" || type === "seedance" ? 420 : 280 };
+  }
+  if (type === "pro-camera" || type === "image") return { width: 600, height: 360 };
+  if (type === "video") return { width: 500, height: 260 };
+  if (type === "suno") return { width: 440, height: 560 };
+  if (type === "panorama-split") return { width: 360, height: 420 };
+  if (type === "panorama-gen") return { width: 360, height: 320 };
+  if (type === "blocking-3d") return { width: 640, height: 520 };
+  if (type === "runninghub" || type === "seedance2-runninghub" || type === "sora2-runninghub") return { width: 340, height: 520 };
+  if (type === "seedance-volc" || type === "seedance2-rh-standard") return { width: 420, height: 580 };
+  if (type === "video-item") return { width: 320, height: 240 };
+  if (type === "audio") return { width: 300, height: 100 };
+  return { width: 280, height: 280 };
+}
+
+function defaultTitleForNode(type: string): string | undefined {
+  const titles: Record<string, string> = {
+    text: "文本便签",
+    image: "AI 生图",
+    "image-item": "参考图",
+    video: "视频生成",
+    "video-item": "视频素材",
+    audio: "音频素材",
+    file: "文件素材",
+    agent: "LLM生成器",
+    llm: "LLM",
+    seedance: "Seedance 2.0",
+    suno: "Suno 音乐",
+    "seedance-volc": "seedance2.0-火山版",
+    "seedance2-rh-standard": "seedance2.0-RH版",
+    runninghub: "RunningHub",
+    "seedance2-runninghub": "Seedance RunningHub",
+    "sora2-runninghub": "Sora RunningHub",
+    "pro-camera": "专业相机",
+    "panorama-gen": "全景图生成",
+    "panorama-split": "全景预览",
+    "blocking-3d": "站位图",
+    "drawing-board": "画板",
+    "frame-extractor": "抽帧",
+    upscale: "超分",
+    resize: "调整尺寸",
+    "smart-split": "智能切分",
+    relay: "集线器",
+    "rh-main": "RH 主节点",
+    "rh-param": "RH 参数",
+    "rh-config": "RH 配置",
+  };
+  return titles[type];
+}
+
+function defaultStatusForNode(type: string, content: string): "idle" | "completed" {
+  if (MATERIAL_NODE_TYPES.has(type) && content) return "completed";
+  return "idle";
+}
+
+function defaultDataForNode(type: string): Record<string, unknown> {
+  if (type === "suno") {
+    return { sunoModel: "suno", sunoVersion: "chirp-fenix", sunoMode: "description", sunoInstrumental: false };
+  }
+  if (type === "seedance-volc") {
+    return { model: "seedance2.0-full", ratio: "16:9", resolution: "720p", duration: 5, watermark: false, generate_audio: true };
+  }
+  if (type === "seedance2-rh-standard") {
+    return {
+      model: "seedance2.0-full",
+      ratio: "adaptive",
+      resolution: "720p",
+      duration: "5",
+      generateAudio: true,
+      realPersonMode: true,
+      conversionSlots: ["all"],
+      returnLastFrame: false,
+      seed: -1,
+    };
+  }
+  if (type === "panorama-gen") {
+    return { panoramaSupplementPrompt: "", panoramaQuality: "2k" };
+  }
+  if (type === "blocking-3d") {
+    return { blockingAspect: "16:9" };
+  }
+  if (type === "drawing-board") {
+    return { boardElements: [], boardWidth: 1024, boardHeight: 1024 };
+  }
+  if (type === "resize") {
+    return { resizeMode: "longest", resizeWidth: 1024, resizeHeight: 1024 };
+  }
+  if (type === "smart-split") {
+    return { splitRows: 3, splitCols: 3, upscale2k: false };
+  }
+  return {};
+}
+
+function materialDataForNode(type: string, url: string): Record<string, unknown> {
+  if (type === "image-item") return { url, kind: "image" };
+  if (type === "video-item") return { url, kind: "video" };
+  if (type === "audio") return { url, kind: "audio" };
+  if (type === "file") return { url, kind: "file" };
+  return {};
+}
+
+function modelDataForNode(type: string, model: string): Record<string, unknown> {
+  if (type === "agent" || type === "llm" || type === "seedance") return { llmModel: model };
+  if (type === "suno") return { sunoModel: model };
+  return { model };
+}
+
+function modelTaskForNode(type: string): string | undefined {
+  if (type === "image" || type === "panorama-gen" || type === "upscale") return "image";
+  if (type === "video" || type === "seedance-volc" || type === "seedance2-rh-standard") return "video";
+  if (type === "suno") return "audio";
+  if (type === "agent" || type === "llm" || type === "seedance") return "llm";
+  return undefined;
+}
+
 function parseOptionalNumber(value: string | undefined, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
@@ -508,11 +805,11 @@ interface CanvasNodeRecord {
   y: number;
   width: number;
   height: number;
-  type: "image" | "image-item";
+  type: string;
   content: string;
   title?: string;
   data: Record<string, unknown>;
-  status: "idle" | "completed";
+  status: string;
 }
 
 interface CanvasOpsResponse {
