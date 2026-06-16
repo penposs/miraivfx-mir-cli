@@ -8,6 +8,8 @@ mir-cli auth login
 mir-cli auth logout
 ```
 
+`auth login` is planned as a browser OAuth/PKCE flow. Until then, local development can use `MIRAIVFX_TOKEN` from the shell environment. Agents must not request or display raw tokens.
+
 ## Projects
 
 ```powershell

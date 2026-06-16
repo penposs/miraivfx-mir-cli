@@ -8,6 +8,7 @@
 - The user enters credentials only in the browser.
 - The CLI stores local authorization data in a secure local store.
 - Agent tools must never receive passwords or raw tokens.
+- `MIRAIVFX_TOKEN` is allowed only as a local development bridge until OAuth/PKCE is implemented.
 
 ## Data Access
 

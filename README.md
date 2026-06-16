@@ -29,6 +29,16 @@ mir-cli canvas models --task image --json
 mir-cli canvas inspect --canvas-id <canvas_id> --summary
 ```
 
+During the first API integration phase, configure local API settings with environment variables:
+
+```powershell
+$env:MIRAIVFX_API_BASE = "https://miraivfx.com/api"
+$env:MIRAIVFX_APP_BASE = "https://miraivfx.com"
+$env:MIRAIVFX_TOKEN = "<local-only bearer token>"
+```
+
+`MIRAIVFX_TOKEN` is a temporary local bridge until browser OAuth/PKCE login is implemented. Do not paste tokens into agent chats and do not commit them.
+
 Full node parameters require an explicit command:
 
 ```powershell
@@ -41,6 +51,7 @@ mir-cli canvas inspect --canvas-id <canvas_id> --json
 - The CLI must not ask users to paste tokens into agent chats.
 - The CLI must not read browser localStorage.
 - The CLI must not access the database directly.
+- Summary commands should be used before full node inspection.
 - Mutations require explicit confirmation flags such as `--yes` or `--allow-generation`.
 - Project and canvas access must be enforced by the Miraivfx backend.
 
