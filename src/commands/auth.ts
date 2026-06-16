@@ -17,12 +17,15 @@ export async function handleAuthCommand(subcommand = "", args: string[]): Promis
       app_base: config.appBase,
       auth_endpoint: config.authEndpoint,
       auth_client_id: maskClientId(config.authClientId),
+      auth_client_configured: Boolean(config.authClientId),
       session_path: sessionPath(),
       user: session?.userLabel ?? null,
       token_source: process.env.MIRAIVFX_TOKEN ? "env:MIRAIVFX_TOKEN" : session ? "local_session" : null,
       next: config.token
         ? null
-        : "Run mir-cli auth login.",
+        : config.authClientId
+          ? "Run mir-cli auth login."
+          : "Set MIRAIVFX_LOGTO_APP_ID to the dedicated MIR CLI Logto app id, then run mir-cli auth login.",
     };
     asJson
       ? json(payload)
@@ -32,6 +35,7 @@ export async function handleAuthCommand(subcommand = "", args: string[]): Promis
 
   if (subcommand === "login") {
     const config = await loadRuntimeConfig();
+    requireAuthClientId(config.authClientId);
     const printUrl = args.includes("--print-url") || args.includes("--no-open");
     let authorizationUrl = "";
     if (printUrl) {
@@ -95,7 +99,16 @@ async function buildLoginPreview(config: {
   };
 }
 
-function maskClientId(value: string): string {
+function maskClientId(value: string): string | null {
+  if (!value) return null;
   if (value.length <= 8) return "***";
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
+function requireAuthClientId(value: string): void {
+  if (!value) {
+    throw new Error(
+      "Missing Logto CLI app id. Create a dedicated MIR CLI Logto application and set MIRAIVFX_LOGTO_APP_ID.",
+    );
+  }
 }

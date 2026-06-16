@@ -20,7 +20,7 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
     process.env.MIRAIVFX_LOGTO_ENDPOINT || process.env.MIRAIVFX_AUTH_ENDPOINT || "https://auth.miraivfx.art",
   );
   const authClientId =
-    process.env.MIRAIVFX_LOGTO_APP_ID || process.env.MIRAIVFX_AUTH_CLIENT_ID || "cmdy6diccdv8daa4bavqy";
+    process.env.MIRAIVFX_LOGTO_APP_ID || process.env.MIRAIVFX_AUTH_CLIENT_ID || "";
   const authRedirectUri =
     process.env.MIRAIVFX_AUTH_REDIRECT_URI || "http://127.0.0.1:39173/callback";
   const session = await loadSession();

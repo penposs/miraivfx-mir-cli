@@ -38,11 +38,11 @@ During the first API integration phase, configure local API settings with enviro
 $env:MIRAIVFX_API_BASE = "https://api.miraivfx.art/api"
 $env:MIRAIVFX_APP_BASE = "https://miraivfx.art"
 $env:MIRAIVFX_LOGTO_ENDPOINT = "https://auth.miraivfx.art"
-$env:MIRAIVFX_LOGTO_APP_ID = "<cli-or-public-logto-app-id>"
+$env:MIRAIVFX_LOGTO_APP_ID = "<dedicated-cli-logto-app-id>"
 $env:MIRAIVFX_AUTH_REDIRECT_URI = "http://127.0.0.1:39173/callback"
 ```
 
-`mir-cli auth login` uses browser OAuth/PKCE. The Logto app must allow the configured localhost redirect URI. `MIRAIVFX_TOKEN` remains a local development bridge only; do not paste tokens into agent chats and do not commit them.
+`mir-cli auth login` uses browser OAuth/PKCE. The Logto app must be a dedicated MIR CLI application and must allow the configured localhost redirect URI. `MIRAIVFX_TOKEN` remains a local development bridge only; do not paste tokens into agent chats and do not commit them.
 
 Full node parameters require an explicit command:
 
