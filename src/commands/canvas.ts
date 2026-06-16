@@ -122,7 +122,10 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
     const action = args[0] ?? "";
     const rest = args.slice(1);
     if (action === "add-image") {
-      const result = await addImageNode(api, rest);
+      const result = await addImageNode(api, rest, config.appBase);
+      if (result.opened && typeof result.url === "string") {
+        await openUrl(result.url);
+      }
       asJson ? json(result) : text(`Added image node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
@@ -221,10 +224,11 @@ function summarizeCanvas(canvas: CanvasData): Record<string, unknown> {
   };
 }
 
-async function addImageNode(api: ApiClient, args: string[]): Promise<Record<string, unknown>> {
+async function addImageNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
   if (!hasFlag(args, "--yes")) {
     throw new Error("Creating a canvas node requires explicit --yes");
   }
+  const shouldOpen = hasFlag(args, "--open");
   const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
   const prompt = getFlagValue(args, "--prompt") ?? "";
   const model = getFlagValue(args, "--model");
@@ -277,10 +281,13 @@ async function addImageNode(api: ApiClient, args: string[]): Promise<Record<stri
     throw new Error("Canvas update was ignored because the server has a newer version. Re-inspect the canvas and retry.");
   }
 
+  const url = `${appBase}/canvas?projectId=${encodeURIComponent(canvas.project_id)}&canvasId=${encodeURIComponent(canvas.id)}`;
   return {
     ok: true,
     canvas_id: canvas.id,
     project_id: canvas.project_id,
+    url,
+    opened: shouldOpen,
     node_id: node.id,
     node_type: node.type,
     prompt,
