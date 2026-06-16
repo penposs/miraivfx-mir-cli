@@ -4,13 +4,13 @@ export async function openUrl(url: string): Promise<void> {
   const platform = process.platform;
   const command =
     platform === "win32"
-      ? "cmd"
+      ? "rundll32.exe"
       : platform === "darwin"
         ? "open"
         : "xdg-open";
   const args =
     platform === "win32"
-      ? ["/c", "start", "", url]
+      ? ["url.dll,FileProtocolHandler", url]
       : [url];
 
   await new Promise<void>((resolve, reject) => {

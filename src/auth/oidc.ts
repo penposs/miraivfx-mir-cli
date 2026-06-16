@@ -142,16 +142,20 @@ function waitForCallback(port: number, path: string, expectedState: string): Pro
           return;
         }
         const error = url.searchParams.get("error");
+        const state = url.searchParams.get("state");
+        if (state !== expectedState) {
+          response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+          response.end("Invalid OAuth state for this login attempt. Waiting for the current login callback.");
+          return;
+        }
         if (error) {
           throw new Error(url.searchParams.get("error_description") || error);
         }
-        const state = url.searchParams.get("state");
-        if (state !== expectedState) {
-          throw new Error("Invalid OAuth state");
-        }
         const code = url.searchParams.get("code");
         if (!code) {
-          throw new Error("Missing authorization code");
+          response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+          response.end("Missing authorization code. Waiting for the current login callback.");
+          return;
         }
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         response.end("<h1>Miraivfx CLI login complete</h1><p>You can close this tab.</p>");
