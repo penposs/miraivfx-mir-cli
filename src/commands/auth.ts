@@ -2,6 +2,7 @@ import { json, text } from "../core/output.js";
 import { loadRuntimeConfig } from "../core/config.js";
 import { loginWithPkce } from "../auth/oidc.js";
 import { clearSession, isSessionExpired, loadSession, sessionPath } from "../auth/session.js";
+import { getFlagValue } from "../core/args.js";
 
 export async function handleAuthCommand(subcommand = "", args: string[]): Promise<void> {
   const asJson = args.includes("--json");
@@ -33,13 +34,21 @@ export async function handleAuthCommand(subcommand = "", args: string[]): Promis
     return;
   }
 
-  if (subcommand === "login") {
+  if (subcommand === "login" || subcommand === "switch") {
     const config = await loadRuntimeConfig();
     requireAuthClientId(config.authClientId);
+    const forceLogin = subcommand === "switch" || args.includes("--force") || args.includes("--switch-account");
+    const prompt = getFlagValue(args, "--prompt") ?? (forceLogin ? "login" : undefined);
+    if (forceLogin && process.env.MIRAIVFX_TOKEN) {
+      throw new Error("MIRAIVFX_TOKEN is set and overrides local sessions. Unset it before switching accounts.");
+    }
+    if (forceLogin) {
+      await clearSession();
+    }
     const printUrl = args.includes("--print-url") || args.includes("--no-open");
     let authorizationUrl = "";
     if (printUrl) {
-      const payload = await buildLoginPreview(config);
+      const payload = await buildLoginPreview(config, prompt);
       asJson ? json(payload) : text(payload.authorization_url);
       return;
     }
@@ -47,6 +56,7 @@ export async function handleAuthCommand(subcommand = "", args: string[]): Promis
       issuer: config.authEndpoint,
       clientId: config.authClientId,
       redirectUri: config.authRedirectUri,
+      prompt,
       onAuthorizationUrl: (url) => {
         authorizationUrl = url;
       },
@@ -70,14 +80,17 @@ export async function handleAuthCommand(subcommand = "", args: string[]): Promis
     return;
   }
 
-  text("Usage: mir-cli auth <status|login|logout>");
+  text("Usage: mir-cli auth <status|login|switch|logout>");
 }
 
-async function buildLoginPreview(config: {
-  authEndpoint: string;
-  authClientId: string;
-  authRedirectUri: string;
-}): Promise<{ authorization_url: string; redirect_uri: string; note: string }> {
+async function buildLoginPreview(
+  config: {
+    authEndpoint: string;
+    authClientId: string;
+    authRedirectUri: string;
+  },
+  prompt?: string,
+): Promise<{ authorization_url: string; redirect_uri: string; prompt: string | null; note: string }> {
   const discoveryUrl = `${config.authEndpoint.replace(/\/+$/, "")}/oidc/.well-known/openid-configuration`;
   const discoveryResponse = await fetch(discoveryUrl);
   if (!discoveryResponse.ok) {
@@ -92,9 +105,13 @@ async function buildLoginPreview(config: {
   url.searchParams.set("state", "<generated>");
   url.searchParams.set("code_challenge", "<generated>");
   url.searchParams.set("code_challenge_method", "S256");
+  if (prompt) {
+    url.searchParams.set("prompt", prompt);
+  }
   return {
     authorization_url: url.toString(),
     redirect_uri: config.authRedirectUri,
+    prompt: prompt ?? null,
     note: "Preview only. Real login generates state and PKCE verifier and starts a local callback server.",
   };
 }

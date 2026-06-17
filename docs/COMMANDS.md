@@ -5,10 +5,13 @@
 ```powershell
 mir-cli auth status
 mir-cli auth login
+mir-cli auth login --force
+mir-cli auth switch
 mir-cli auth logout
 ```
 
 Use `auth login` to sign in through the browser. Agents must not ask users for passwords or raw tokens.
+Use `auth switch` or `auth login --force` to change accounts; this clears the local session and sends `prompt=login` to the browser authorization flow.
 
 ## Projects
 

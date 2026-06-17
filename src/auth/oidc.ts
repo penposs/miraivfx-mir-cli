@@ -9,6 +9,7 @@ export interface OidcLoginOptions {
   clientId: string;
   redirectUri: string;
   scopes?: string[];
+  prompt?: string;
   openBrowser?: boolean;
   onAuthorizationUrl?: (url: string) => void;
 }
@@ -50,6 +51,9 @@ export async function loginWithPkce(options: OidcLoginOptions): Promise<AuthSess
   authUrl.searchParams.set("state", state);
   authUrl.searchParams.set("code_challenge", codeChallenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
+  if (options.prompt) {
+    authUrl.searchParams.set("prompt", options.prompt);
+  }
 
   options.onAuthorizationUrl?.(authUrl.toString());
   if (options.openBrowser !== false) {

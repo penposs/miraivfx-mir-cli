@@ -38,6 +38,14 @@ mir-cli auth login
 
 This opens a browser window. Sign in with your Miraivfx account, then return to your terminal or AI assistant.
 
+Switch to a different browser account:
+
+```powershell
+mir-cli auth switch
+```
+
+This clears the local CLI session and asks the browser sign-in page to prompt for account selection again. You can also run `mir-cli auth login --force`.
+
 Check whether you are signed in:
 
 ```powershell
