@@ -118,11 +118,15 @@ Upload a local file you selected:
 mir-cli canvas upload --project-id <project_id> --file ./character.png --allow-upload --json
 ```
 
+Uploads are cached by local file sha256 and project id, so repeating the same upload returns the previous URL. Use `--force-upload` when you intentionally need a new upload.
+
 Add an uploaded image as a reference node:
 
 ```powershell
 mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_image_url> --yes --json
 ```
+
+Reference image nodes reuse an existing node with the same URL by default. New nodes are placed into the next open canvas position when you omit `--x` and `--y`.
 
 Connect a reference asset to a generation node:
 

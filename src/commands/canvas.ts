@@ -1,5 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { basename } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { getFlagValue, hasFlag } from "../core/args.js";
 import { ApiClient } from "../api/client.js";
 import { loadRuntimeConfig } from "../core/config.js";
@@ -79,13 +81,21 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       throw new Error("Upload requires explicit --allow-upload");
     }
     const filePath = requireValue(getFlagValue(args, "--file"), "--file");
-    const form = new FormData();
-    const fileBuffer = await import("node:fs/promises").then((fs) => fs.readFile(filePath));
-    form.set("file", new Blob([fileBuffer]), basename(filePath));
+    const fileBuffer = await readFile(filePath);
+    const fileHash = createHash("sha256").update(fileBuffer).digest("hex");
     const projectId = getFlagValue(args, "--project-id");
+    if (!hasFlag(args, "--force-upload")) {
+      const cached = await readUploadCache(fileHash, projectId);
+      if (cached) {
+        json({ ...cached, sha256: fileHash, reused: true, cache_hit: true });
+        return;
+      }
+    }
+    const form = new FormData();
+    form.set("file", new Blob([fileBuffer]), basename(filePath));
     if (projectId) form.set("project_id", projectId);
     const response = await api.postForm<UploadResponse>("/files/upload", form);
-    json({
+    const payload = {
       filename: response.filename,
       original_filename: response.original_filename,
       url: response.url,
@@ -93,7 +103,12 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       size: response.size,
       project_id: response.project_id,
       converted_to_jpg: response.converted_to_jpg,
-    });
+      sha256: fileHash,
+      reused: false,
+      cache_hit: false,
+    };
+    await writeUploadCache(fileHash, projectId, payload);
+    json(payload);
     return;
   }
 
@@ -342,9 +357,13 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
   }
   const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt") ?? "";
   const title = getFlagValue(args, "--title") ?? defaultTitleForNode(nodeType);
-  const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x") ?? 0;
-  const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y") ?? 0;
+  const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
+  const requestedY = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
   const shape = defaultShapeForNode(nodeType);
+  const canvas = requestedX === undefined || requestedY === undefined ? await getCanvasData(api, canvasId) : undefined;
+  const position = resolveNodePosition(canvas, nodeType, shape, requestedX, requestedY);
+  const x = position.x;
+  const y = position.y;
   const width = parseOptionalNumber(getFlagValue(args, "--width"), "--width") ?? shape.width;
   const height = parseOptionalNumber(getFlagValue(args, "--height"), "--height") ?? shape.height;
   const status = getFlagValue(args, "--status") ?? defaultStatusForNode(nodeType, content);
@@ -437,8 +456,13 @@ async function addImageNode(api: ApiClient, args: string[], appBase: string): Pr
   const prompt = getFlagValue(args, "--prompt") ?? "";
   const model = getFlagValue(args, "--model");
   const title = getFlagValue(args, "--title") ?? "AI 生图";
-  const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x") ?? 0;
-  const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y") ?? 0;
+  const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
+  const requestedY = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
+  const shape = defaultShapeForNode("image");
+  const canvas = requestedX === undefined || requestedY === undefined ? await getCanvasData(api, canvasId) : undefined;
+  const position = resolveNodePosition(canvas, "image", shape, requestedX, requestedY);
+  const x = position.x;
+  const y = position.y;
   const settings = parseSettings(getFlagValue(args, "--settings-json"));
 
   if (model) {
@@ -450,8 +474,8 @@ async function addImageNode(api: ApiClient, args: string[], appBase: string): Pr
     id: randomUUID(),
     x,
     y,
-    width: 600,
-    height: 360,
+    width: shape.width,
+    height: shape.height,
     type: "image",
     content: prompt,
     title,
@@ -633,8 +657,21 @@ async function cloneCanvasNode(api: ApiClient, args: string[], appBase: string):
   const sourceNodeId = requireValue(getFlagValue(args, "--node-id") ?? getFlagValue(args, "--source-node"), "--node-id");
   const canvas = await getCanvasData(api, canvasId);
   const source = findCanvasNode(canvas, sourceNodeId) as unknown as CanvasNodeRecord;
-  const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x") ?? (Number(source.x || 0) + 460);
-  const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y") ?? Number(source.y || 0);
+  const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
+  const requestedY = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
+  const shape = {
+    width: Number(source.width || defaultShapeForNode(String(source.type)).width),
+    height: Number(source.height || defaultShapeForNode(String(source.type)).height),
+  };
+  const position = resolveNodePosition(
+    canvas,
+    String(source.type),
+    shape,
+    requestedX ?? (Number(source.x || 0) + shape.width + 80),
+    requestedY ?? Number(source.y || 0),
+  );
+  const x = position.x;
+  const y = position.y;
   const title = getFlagValue(args, "--title") ?? `${String(source.title || source.type || "Node")} v2`;
   const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt") ?? String(source.content || "");
   const dataJson = parseSettings(getFlagValue(args, "--data-json")) ?? {};
@@ -643,8 +680,8 @@ async function cloneCanvasNode(api: ApiClient, args: string[], appBase: string):
     id: randomUUID(),
     x,
     y,
-    width: Number(source.width || defaultShapeForNode(String(source.type)).width),
-    height: Number(source.height || defaultShapeForNode(String(source.type)).height),
+    width: shape.width,
+    height: shape.height,
     type: String(source.type),
     content,
     title,
@@ -689,17 +726,39 @@ async function addReferenceImageNode(api: ApiClient, args: string[], appBase: st
   const imageUrl = requireValue(getFlagValue(args, "--url"), "--url");
   validateCanvasAssetUrl(imageUrl);
   const title = getFlagValue(args, "--title") ?? "参考图";
-  const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x") ?? -340;
-  const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y") ?? 0;
+  const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
+  const requestedY = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
   const connectTo = getFlagValue(args, "--connect-to");
+  const canvas = await getCanvasData(api, canvasId);
+  const existing = hasFlag(args, "--force-new") || hasFlag(args, "--duplicate")
+    ? undefined
+    : findMaterialNodeByUrl(canvas, imageUrl);
+  if (existing) {
+    const ops = connectTo && !hasConnection(canvas, String(existing.id), connectTo)
+      ? [{ type: "connect", id: randomUUID(), fromNode: String(existing.id), toNode: connectTo }]
+      : [];
+    const result = ops.length ? await applyCanvasOps(api, appBase, canvas, ops) : canvasResult(appBase, canvas);
+    return {
+      ...result,
+      node_id: String(existing.id),
+      node_type: String(existing.type || "image-item"),
+      image_url: imageUrl,
+      connected_to: connectTo ?? null,
+      reused_node: true,
+    };
+  }
+  const shape = defaultShapeForNode("image-item");
+  const position = resolveNodePosition(canvas, "image-item", shape, requestedX, requestedY);
+  const x = position.x;
+  const y = position.y;
 
   const now = Date.now();
   const node: CanvasNodeRecord = {
     id: randomUUID(),
     x,
     y,
-    width: 280,
-    height: 280,
+    width: shape.width,
+    height: shape.height,
     type: "image-item",
     content: imageUrl,
     title,
@@ -807,6 +866,119 @@ async function applyCanvasOps(
     deleted_node_ids: update.data?.deleted_node_ids ?? [],
     deleted_connection_ids: update.data?.deleted_connection_ids ?? [],
   };
+}
+
+function canvasResult(appBase: string, canvas: CanvasData): Record<string, unknown> {
+  const url = `${appBase}/canvas?projectId=${encodeURIComponent(canvas.project_id)}&canvasId=${encodeURIComponent(canvas.id)}`;
+  return {
+    ok: true,
+    canvas_id: canvas.id,
+    project_id: canvas.project_id,
+    url,
+    revision: canvas.revision,
+    clientModifiedAt: canvas.clientModifiedAt,
+    created_nodes: [],
+    created_connections: [],
+    updated_nodes: [],
+    deleted_node_ids: [],
+    deleted_connection_ids: [],
+  };
+}
+
+function resolveNodePosition(
+  canvas: CanvasData | undefined,
+  nodeType: string,
+  shape: { width: number; height: number },
+  requestedX: number | undefined,
+  requestedY: number | undefined,
+): { x: number; y: number } {
+  const base = defaultLanePosition(nodeType);
+  const start = {
+    x: requestedX ?? base.x,
+    y: requestedY ?? base.y,
+  };
+  if (!canvas) return start;
+
+  const gap = 80;
+  const rects = canvas.nodes
+    .map(nodeRect)
+    .filter((rect): rect is NodeRect => Boolean(rect));
+  let candidate = start;
+  for (let index = 0; index < 400; index += 1) {
+    const overlaps = rects.some((rect) => rectsOverlap(candidate, shape, rect, gap));
+    if (!overlaps) return candidate;
+    candidate = nextLanePosition(start, shape, index + 1, nodeType);
+  }
+  return candidate;
+}
+
+function defaultLanePosition(nodeType: string): { x: number; y: number } {
+  if (MATERIAL_NODE_TYPES.has(nodeType)) return { x: -520, y: 0 };
+  if (nodeType === "relay") return { x: -80, y: 0 };
+  return { x: 0, y: 0 };
+}
+
+function nextLanePosition(
+  start: { x: number; y: number },
+  shape: { width: number; height: number },
+  index: number,
+  nodeType: string,
+): { x: number; y: number } {
+  const verticalStep = shape.height + 80;
+  if (MATERIAL_NODE_TYPES.has(nodeType)) {
+    const rows = 4;
+    return {
+      x: start.x - Math.floor(index / rows) * (shape.width + 80),
+      y: start.y + (index % rows) * verticalStep,
+    };
+  }
+  return {
+    x: start.x + Math.floor(index / 3) * (shape.width + 120),
+    y: start.y + (index % 3) * verticalStep,
+  };
+}
+
+function nodeRect(value: unknown): NodeRect | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  const x = Number(item.x);
+  const y = Number(item.y);
+  const width = Number(item.width || defaultShapeForNode(String(item.type || "")).width);
+  const height = Number(item.height || defaultShapeForNode(String(item.type || "")).height);
+  if (![x, y, width, height].every(Number.isFinite)) return undefined;
+  return { x, y, width, height };
+}
+
+function rectsOverlap(
+  candidate: { x: number; y: number },
+  shape: { width: number; height: number },
+  rect: NodeRect,
+  gap: number,
+): boolean {
+  return (
+    candidate.x < rect.x + rect.width + gap &&
+    candidate.x + shape.width + gap > rect.x &&
+    candidate.y < rect.y + rect.height + gap &&
+    candidate.y + shape.height + gap > rect.y
+  );
+}
+
+function findMaterialNodeByUrl(canvas: CanvasData, url: string): Record<string, unknown> | undefined {
+  return (canvas.nodes ?? []).find((node) => {
+    if (!node || typeof node !== "object") return false;
+    const item = node as Record<string, unknown>;
+    if (!MATERIAL_NODE_TYPES.has(String(item.type || ""))) return false;
+    const data = item.data && typeof item.data === "object" ? item.data as Record<string, unknown> : {};
+    return String(item.content || "") === url || String(data.url || "") === url;
+  }) as Record<string, unknown> | undefined;
+}
+
+function hasConnection(canvas: CanvasData, fromNode: string, toNode: string): boolean {
+  return (canvas.connections ?? []).some((connection) => {
+    if (!connection || typeof connection !== "object") return false;
+    const item = connection as Record<string, unknown>;
+    return String(item.fromNode || "") === fromNode && String(item.toNode || "") === toNode;
+  });
 }
 
 async function assertModelAvailable(api: ApiClient, task: string, modelId: string): Promise<void> {
@@ -1076,6 +1248,13 @@ interface CanvasNodeRecord {
   status: string;
 }
 
+interface NodeRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface CanvasOpsResponse {
   success: boolean;
   data?: {
@@ -1124,6 +1303,49 @@ interface UploadResponse {
   size: number;
   project_id?: string | null;
   converted_to_jpg?: boolean;
+}
+
+interface UploadCacheEntry {
+  filename?: string;
+  original_filename?: string;
+  url: string;
+  path?: string;
+  size?: number;
+  project_id?: string | null;
+  converted_to_jpg?: boolean;
+}
+
+async function readUploadCache(hash: string, projectId: string | undefined): Promise<UploadCacheEntry | undefined> {
+  try {
+    const raw = await readFile(uploadCachePath(), "utf8");
+    const cache = JSON.parse(raw) as Record<string, UploadCacheEntry>;
+    const entry = cache[uploadCacheKey(hash, projectId)];
+    return entry?.url ? entry : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeUploadCache(hash: string, projectId: string | undefined, entry: UploadCacheEntry): Promise<void> {
+  const target = uploadCachePath();
+  let cache: Record<string, UploadCacheEntry> = {};
+  try {
+    cache = JSON.parse(await readFile(target, "utf8")) as Record<string, UploadCacheEntry>;
+  } catch {
+    cache = {};
+  }
+  cache[uploadCacheKey(hash, projectId)] = entry;
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+}
+
+function uploadCacheKey(hash: string, projectId: string | undefined): string {
+  return `${projectId || "global"}:${hash}`;
+}
+
+function uploadCachePath(): string {
+  const base = process.env.MIRAIVFX_CONFIG_DIR || join(homedir(), ".miraivfx", "mir-cli");
+  return join(base, "upload-cache.json");
 }
 
 function getAllowedDownloadHosts(apiBase: string): string[] {
