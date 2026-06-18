@@ -4,7 +4,7 @@
   "description": "Agent-friendly CLI for Miraivfx projects, canvases, models, and canvas nodes.",
   "type": "module",
   "bin": {
-    "mir-cli": "./dist/cli.js"
+    "mir-cli": "dist/cli.js"
   },
   "files": [
     "dist",
