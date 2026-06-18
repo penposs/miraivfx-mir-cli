@@ -20,14 +20,16 @@ Use `mir-cli` when you want to:
 
 ## Install
 
+Current public install:
+
 ```powershell
-npm i -g @miraivfx/mir-cli
+npm i -g github:penposs/miraivfx-mir-cli
 ```
 
-Or run it without installing:
+After the npm package is published, this shorter command will also work:
 
 ```powershell
-npx @miraivfx/mir-cli --help
+npm i -g @miraivfx/mir-cli
 ```
 
 ## Sign In
