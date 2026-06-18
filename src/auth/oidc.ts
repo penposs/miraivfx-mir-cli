@@ -44,7 +44,6 @@ export async function loginWithPkce(options: OidcLoginOptions): Promise<AuthSess
   const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
   const scopes = options.scopes ?? ["openid", "email", "profile", "offline_access"];
 
-  const callbackPromise = waitForCallback(port, redirect.pathname, state);
   const authUrl = new URL(discovery.authorization_endpoint);
   authUrl.searchParams.set("client_id", options.clientId);
   authUrl.searchParams.set("redirect_uri", options.redirectUri);
@@ -57,6 +56,7 @@ export async function loginWithPkce(options: OidcLoginOptions): Promise<AuthSess
     authUrl.searchParams.set("prompt", options.prompt);
   }
 
+  const callbackPromise = waitForCallback(port, redirect.pathname, state, authUrl.toString());
   options.onAuthorizationUrl?.(authUrl.toString());
   if (options.openBrowser !== false) {
     await openUrl(authUrl.toString(), {
@@ -135,7 +135,7 @@ async function exchangeCode(
   return token;
 }
 
-function waitForCallback(port: number, path: string, expectedState: string): Promise<string> {
+function waitForCallback(port: number, path: string, expectedState: string, authorizationUrl: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       server.close();
@@ -153,8 +153,8 @@ function waitForCallback(port: number, path: string, expectedState: string): Pro
         const error = url.searchParams.get("error");
         const state = url.searchParams.get("state");
         if (state !== expectedState) {
-          response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
-          response.end("Invalid OAuth state for this login attempt. Waiting for the current login callback.");
+          response.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+          response.end(renderInvalidStatePage(authorizationUrl));
           return;
         }
         if (error) {
@@ -190,4 +190,36 @@ function waitForCallback(port: number, path: string, expectedState: string): Pro
 
 function randomUrlSafe(size = 32): string {
   return randomBytes(size).toString("base64url");
+}
+
+function renderInvalidStatePage(authorizationUrl: string): string {
+  const escapedUrl = escapeHtml(authorizationUrl);
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Miraivfx CLI login</title>
+    <style>
+      body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 48px auto; padding: 0 24px; line-height: 1.5; color: #172033; }
+      a.button { display: inline-block; margin-top: 16px; padding: 10px 14px; border-radius: 6px; background: #2563eb; color: white; text-decoration: none; }
+      code { word-break: break-all; background: #f3f4f6; padding: 2px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>This is an old login callback</h1>
+    <p>The browser opened a callback URL from another CLI login attempt. The CLI is still waiting for the current login.</p>
+    <p>Continue with the current authorization URL:</p>
+    <p><a class="button" href="${escapedUrl}">Continue CLI login</a></p>
+    <p><code>${escapedUrl}</code></p>
+  </body>
+</html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
