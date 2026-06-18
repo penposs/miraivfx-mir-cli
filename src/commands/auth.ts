@@ -45,7 +45,10 @@ export async function handleAuthCommand(subcommand = "", args: string[]): Promis
     if (forceLogin) {
       await clearSession();
     }
-    const printUrl = args.includes("--print-url") || args.includes("--no-open");
+    const printUrl = args.includes("--print-url");
+    const noOpen = args.includes("--no-open");
+    const browser = getFlagValue(args, "--browser") ?? process.env.MIRAIVFX_AUTH_BROWSER;
+    const browserCommand = getFlagValue(args, "--browser-command") ?? process.env.MIRAIVFX_AUTH_BROWSER_COMMAND;
     let authorizationUrl = "";
     if (printUrl) {
       const payload = await buildLoginPreview(config, prompt);
@@ -57,8 +60,19 @@ export async function handleAuthCommand(subcommand = "", args: string[]): Promis
       clientId: config.authClientId,
       redirectUri: config.authRedirectUri,
       prompt,
+      openBrowser: !noOpen,
+      browser,
+      browserCommand,
       onAuthorizationUrl: (url) => {
         authorizationUrl = url;
+        if (noOpen) {
+          const payload = {
+            authorization_url: url,
+            redirect_uri: config.authRedirectUri,
+            action: "Open this URL in a separate browser, incognito window, or browser profile to keep CLI login isolated from your website session.",
+          };
+          asJson ? console.error(JSON.stringify(payload, null, 2)) : text(`Open this URL to sign in:\n${url}`);
+        }
       },
     });
     const payload = {
@@ -66,7 +80,12 @@ export async function handleAuthCommand(subcommand = "", args: string[]): Promis
       user: session.userLabel ?? null,
       expires_at: session.expiresAt ?? null,
       session_path: sessionPath(),
-      authorization_url_opened: Boolean(authorizationUrl),
+      authorization_url_opened: !noOpen && Boolean(authorizationUrl),
+      authorization_url_generated: Boolean(authorizationUrl),
+      browser: noOpen ? null : browser ?? "default",
+      isolated_login_hint: noOpen
+        ? "Login URL was not opened automatically."
+        : "Use --no-open or --browser <name> to keep CLI login separate from your everyday website browser.",
       security: "Session saved locally. Tokens are not printed.",
     };
     asJson ? json(payload) : text(`Logged in${session.userLabel ? ` as ${session.userLabel}` : ""}.`);

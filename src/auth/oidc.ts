@@ -11,6 +11,8 @@ export interface OidcLoginOptions {
   scopes?: string[];
   prompt?: string;
   openBrowser?: boolean;
+  browser?: string;
+  browserCommand?: string;
   onAuthorizationUrl?: (url: string) => void;
 }
 
@@ -57,7 +59,10 @@ export async function loginWithPkce(options: OidcLoginOptions): Promise<AuthSess
 
   options.onAuthorizationUrl?.(authUrl.toString());
   if (options.openBrowser !== false) {
-    await openUrl(authUrl.toString());
+    await openUrl(authUrl.toString(), {
+      browser: options.browser,
+      browserCommand: options.browserCommand,
+    });
   }
   const code = await callbackPromise;
   const token = await exchangeCode(discovery.token_endpoint, {

@@ -4,6 +4,8 @@ export function printHelp(): void {
 Usage:
   mir-cli auth status
   mir-cli auth login
+  mir-cli auth login --no-open
+  mir-cli auth login --browser edge
   mir-cli auth switch
   mir-cli project list --json
   mir-cli project create --name "Project name" --json

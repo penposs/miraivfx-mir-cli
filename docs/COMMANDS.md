@@ -5,12 +5,16 @@
 ```powershell
 mir-cli auth status
 mir-cli auth login
+mir-cli auth login --no-open
+mir-cli auth login --browser edge
 mir-cli auth login --force
 mir-cli auth switch
 mir-cli auth logout
 ```
 
 Use `auth login` to sign in through the browser. Agents must not ask users for passwords or raw tokens.
+Use `auth login --no-open` to print a real sign-in URL and wait for the callback; open the URL in another browser, incognito window, or browser profile to keep CLI sign-in separate from the website session.
+Use `auth login --browser edge`, `--browser chrome`, `--browser firefox`, `MIRAIVFX_AUTH_BROWSER`, or `--browser-command "msedge --inprivate {url}"` to choose where the sign-in page opens.
 Use `auth switch` or `auth login --force` to change accounts; this clears the local session and sends `prompt=login` to the browser authorization flow.
 
 ## Projects

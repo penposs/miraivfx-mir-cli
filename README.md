@@ -38,6 +38,28 @@ mir-cli auth login
 
 This opens a browser window. Sign in with your Miraivfx account, then return to your terminal or AI assistant.
 
+Keep CLI sign-in separate from your everyday website browser:
+
+```powershell
+mir-cli auth login --no-open
+```
+
+This prints a real sign-in URL and waits for the callback. Open that URL in another browser, an incognito window, or a separate browser profile if you want the CLI account to stay independent from the Miraivfx website session you use every day.
+
+Open the sign-in page with a specific browser:
+
+```powershell
+mir-cli auth login --browser edge
+mir-cli auth login --browser chrome
+mir-cli auth login --browser firefox
+```
+
+You can also set `MIRAIVFX_AUTH_BROWSER=edge` or pass a custom launcher with `{url}`:
+
+```powershell
+mir-cli auth login --browser-command "msedge --inprivate {url}"
+```
+
 Switch to a different browser account:
 
 ```powershell
