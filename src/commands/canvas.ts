@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -121,6 +122,28 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
   if (subcommand === "download") {
     const payload = manualWebOnlyPayload("canvas download");
     asJson ? json(payload) : text(payload.message);
+    return;
+  }
+
+  if (subcommand === "results") {
+    const action = args[0] ?? "list";
+    const rest = args.slice(1);
+    if (action === "list") {
+      const payload = await listCanvasResults(api, rest);
+      asJson ? json(payload) : text(formatCanvasResults(payload.results));
+      return;
+    }
+    if (action === "download") {
+      const payload = await downloadCanvasResults(api, rest);
+      asJson ? json(payload) : text(`Downloaded ${payload.downloaded.length} result(s) to ${payload.output_dir}`);
+      return;
+    }
+    if (action === "watch") {
+      const payload = await watchCanvasResults(api, rest);
+      asJson ? json(payload) : text(`Downloaded ${payload.downloaded.length} result(s) to ${payload.output_dir}`);
+      return;
+    }
+    text("Usage: mir-cli canvas results <list|download|watch> --canvas-id <canvas_id>");
     return;
   }
 
@@ -296,6 +319,164 @@ async function listCanvasesForProject(
     revision: item.revision ?? 0,
     updated_at: item.updatedAt,
   }));
+}
+
+async function listCanvasResults(api: ApiClient, args: string[]): Promise<CanvasResultsPayload> {
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const limit = getFlagValue(args, "--limit") ?? "100";
+  const response = await api.getJson<CanvasResultsResponse>(
+    `/canvas/${encodeURIComponent(canvasId)}/results?limit=${encodeURIComponent(limit)}`,
+  );
+  if (!response.success || !response.data) {
+    throw new Error(response.error ?? "Failed to list canvas results");
+  }
+  return response.data;
+}
+
+async function downloadCanvasResults(api: ApiClient, args: string[]): Promise<CanvasResultsDownloadPayload> {
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const resultId = getFlagValue(args, "--result-id");
+  const outputDir = getFlagValue(args, "--output") ?? join(process.cwd(), "miraivfx-results", canvasId);
+  const resultsPayload = await listCanvasResults(api, ["--canvas-id", canvasId, "--limit", getFlagValue(args, "--limit") ?? "100"]);
+  const targets = resultId
+    ? resultsPayload.results.filter((item) => item.id === resultId)
+    : resultsPayload.results;
+  if (resultId && targets.length === 0) {
+    throw new Error(`Result not found in canvas ${canvasId}: ${resultId}`);
+  }
+  const downloaded = await downloadResultItems(api, outputDir, targets, hasFlag(args, "--overwrite"));
+  return {
+    ok: true,
+    canvas_id: canvasId,
+    output_dir: outputDir,
+    downloaded,
+    skipped: targets.length - downloaded.length,
+    result_count: resultsPayload.results.length,
+  };
+}
+
+async function watchCanvasResults(api: ApiClient, args: string[]): Promise<CanvasResultsDownloadPayload> {
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const outputDir = getFlagValue(args, "--output") ?? join(process.cwd(), "miraivfx-results", canvasId);
+  const intervalMs = Math.max(5, Number(getFlagValue(args, "--interval") ?? "15")) * 1000;
+  const timeoutMs = Math.max(10, Number(getFlagValue(args, "--timeout") ?? "7200")) * 1000;
+  const maxDownloads = Math.max(1, Number(getFlagValue(args, "--max-downloads") ?? "100"));
+  const overwrite = hasFlag(args, "--overwrite");
+  const startedAt = Date.now();
+  const downloaded: DownloadedResult[] = [];
+  const seen = new Set((await readResultsManifest(outputDir)).results.map((item) => item.id));
+
+  while (Date.now() - startedAt <= timeoutMs && downloaded.length < maxDownloads) {
+    const payload = await listCanvasResults(api, ["--canvas-id", canvasId, "--limit", String(maxDownloads)]);
+    const targets = payload.results.filter((item) => !seen.has(item.id)).slice(0, maxDownloads - downloaded.length);
+    const batch = await downloadResultItems(api, outputDir, targets, overwrite);
+    for (const item of batch) {
+      downloaded.push(item);
+      seen.add(item.id);
+    }
+    if (hasFlag(args, "--once")) break;
+    if (downloaded.length >= maxDownloads) break;
+    await delay(intervalMs);
+  }
+
+  return {
+    ok: true,
+    canvas_id: canvasId,
+    output_dir: outputDir,
+    downloaded,
+    skipped: 0,
+    result_count: downloaded.length,
+  };
+}
+
+async function downloadResultItems(
+  api: ApiClient,
+  outputDir: string,
+  results: CanvasResultItem[],
+  overwrite: boolean,
+): Promise<DownloadedResult[]> {
+  await mkdir(outputDir, { recursive: true });
+  const manifest = await readResultsManifest(outputDir);
+  const downloaded: DownloadedResult[] = [];
+  const existingIds = new Set(manifest.results.map((item) => item.id));
+
+  for (const result of results) {
+    if (!overwrite && existingIds.has(result.id)) {
+      continue;
+    }
+    const filename = uniqueFilename(outputDir, safeFilename(result.filename || `${result.id}.bin`), overwrite);
+    const response = await api.getBinary(result.download_url);
+    const target = join(outputDir, filename);
+    await writeFile(target, response.data, { flag: overwrite ? "w" : "wx" });
+    const item = {
+      id: result.id,
+      canvas_id: result.canvas_id,
+      node_id: result.node_id ?? null,
+      type: result.type,
+      filename,
+      path: target,
+      bytes: response.data.byteLength,
+      downloaded_at: new Date().toISOString(),
+    };
+    downloaded.push(item);
+    manifest.results = manifest.results.filter((entry) => entry.id !== result.id);
+    manifest.results.push(item);
+    existingIds.add(result.id);
+    await writeResultsManifest(outputDir, manifest);
+  }
+
+  return downloaded;
+}
+
+async function readResultsManifest(outputDir: string): Promise<ResultsManifest> {
+  try {
+    const raw = await readFile(join(outputDir, "manifest.json"), "utf8");
+    const parsed = JSON.parse(raw) as Partial<ResultsManifest>;
+    return {
+      schema: "miraivfx-cli-results-v1",
+      results: Array.isArray(parsed.results) ? parsed.results as DownloadedResult[] : [],
+    };
+  } catch {
+    return { schema: "miraivfx-cli-results-v1", results: [] };
+  }
+}
+
+async function writeResultsManifest(outputDir: string, manifest: ResultsManifest): Promise<void> {
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(join(outputDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+function formatCanvasResults(results: CanvasResultItem[]): string {
+  if (!results.length) return "No completed downloadable results found for this canvas.";
+  return results
+    .map((item) => `${item.id}\t${item.type}\t${item.node_title ?? item.node_id ?? "-"}\t${item.filename}`)
+    .join("\n");
+}
+
+function safeFilename(value: string): string {
+  const cleaned = value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/^\.+$/, "_");
+  return cleaned.slice(0, 180) || "result.bin";
+}
+
+function uniqueFilename(outputDir: string, filename: string, overwrite: boolean): string {
+  if (overwrite) return filename;
+  const dot = filename.lastIndexOf(".");
+  const stem = dot > 0 ? filename.slice(0, dot) : filename;
+  const ext = dot > 0 ? filename.slice(dot) : "";
+  let candidate = filename;
+  let index = 1;
+  while (true) {
+    if (existsSync(join(outputDir, candidate))) {
+      candidate = `${stem}-${index}${ext}`;
+      index += 1;
+      continue;
+    }
+    return candidate;
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function resolveCanvasTarget(api: ApiClient, args: string[]): Promise<{ canvas_id: string; project_id: string; name?: string }> {
@@ -1222,6 +1403,59 @@ interface GetCanvasResponse {
   success: boolean;
   data?: CanvasData;
   error?: string;
+}
+
+interface CanvasResultsResponse {
+  success: boolean;
+  data?: CanvasResultsPayload;
+  error?: string;
+}
+
+interface CanvasResultsPayload {
+  canvas_id: string;
+  project_id: string;
+  canvas_name: string;
+  count: number;
+  results: CanvasResultItem[];
+}
+
+interface CanvasResultItem {
+  id: string;
+  canvas_id: string;
+  node_id?: string | null;
+  node_title?: string | null;
+  type: string;
+  status: string;
+  filename: string;
+  mime_type: string;
+  created_at?: string | null;
+  completed_at?: string | null;
+  download_url: string;
+}
+
+interface DownloadedResult {
+  id: string;
+  canvas_id: string;
+  node_id: string | null;
+  type: string;
+  filename: string;
+  path: string;
+  bytes: number;
+  downloaded_at: string;
+}
+
+interface ResultsManifest {
+  schema: "miraivfx-cli-results-v1";
+  results: DownloadedResult[];
+}
+
+interface CanvasResultsDownloadPayload {
+  ok: true;
+  canvas_id: string;
+  output_dir: string;
+  downloaded: DownloadedResult[];
+  skipped: number;
+  result_count: number;
 }
 
 interface CanvasData {

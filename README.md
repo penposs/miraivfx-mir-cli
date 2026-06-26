@@ -207,7 +207,8 @@ Clone shot 3 as a new version, keep the same references, and change the prompt t
 - You sign in through the browser.
 - Canvas-changing commands require explicit flags such as `--yes` or `--allow-upload`.
 - The CLI edits your canvas with focused node operations.
-- Generation, task progress, and result downloads stay in the Miraivfx web app.
+- Generation submission stays in the Miraivfx web app.
+- Result downloads are limited to completed final media from one explicit canvas.
 - You should never give an AI assistant your password or raw tokens.
 - Before changing existing nodes, the assistant should inspect the current canvas first.
 

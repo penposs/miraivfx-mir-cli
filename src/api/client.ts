@@ -58,6 +58,19 @@ export class ApiClient {
     return (await response.json()) as T;
   }
 
+  async getBinary(path: string): Promise<{ data: Uint8Array; headers: Headers }> {
+    const response = await fetch(`${this.options.baseUrl}${path}`, {
+      headers: this.headers(),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: HTTP ${response.status}`);
+    }
+    return {
+      data: new Uint8Array(await response.arrayBuffer()),
+      headers: response.headers,
+    };
+  }
+
   private headers(): Record<string, string> {
     return this.options.token
       ? { Authorization: `Bearer ${this.options.token}` }

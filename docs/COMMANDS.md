@@ -119,6 +119,16 @@ Delete only exact node ids. Agents should summarize what will be deleted before 
 - Do not duplicate identical asset nodes in one operation.
 - Keep spacing readable: no overlapping nodes and no excessive blank space.
 
+## Canvas Results
+
+```powershell
+mir-cli canvas results list --canvas-id <canvas_id> --json
+mir-cli canvas results download --canvas-id <canvas_id> --output ./downloads --json
+mir-cli canvas results watch --canvas-id <canvas_id> --output ./downloads --interval 15 --timeout 7200 --json
+```
+
+Result commands only read completed final media from the explicit canvas id. They do not download all projects, all canvases, history records, source assets, provider responses, storage keys, or internal task data.
+
 ## Web-Only Actions
 
 ```powershell
@@ -127,4 +137,4 @@ mir-cli canvas download --json
 mir-cli canvas run --json
 ```
 
-These commands are intentionally web-only. Users review the Miraivfx canvas and run generation in the browser.
+These broad commands are intentionally web-only. Users review the Miraivfx canvas and run generation in the browser.

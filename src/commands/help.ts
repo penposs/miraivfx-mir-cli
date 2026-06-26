@@ -16,6 +16,9 @@ Usage:
   mir-cli canvas capabilities --json
   mir-cli canvas models --task image --json
   mir-cli canvas inspect --canvas-id <canvas_id> --summary
+  mir-cli canvas results list --canvas-id <canvas_id> --json
+  mir-cli canvas results download --canvas-id <canvas_id> --output ./downloads --json
+  mir-cli canvas results watch --canvas-id <canvas_id> --output ./downloads --json
   mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Note" --yes --json
   mir-cli canvas node update --canvas-id <canvas_id> --node-id <node_id> --prompt "Updated prompt" --yes --json
   mir-cli canvas node clone --canvas-id <canvas_id> --node-id <node_id> --copy-inputs --yes --json
@@ -27,5 +30,5 @@ Usage:
   mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <image_url> --connect-to <node_id> --yes --json
   mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
 
-Canvas node commands append allowed nodes only. Use canvas capabilities for supported node types. Generation submission, task status, and downloads are manual web actions.`);
+Canvas result commands only read completed final media from one explicit canvas. Generation submission remains a manual web action.`);
 }
