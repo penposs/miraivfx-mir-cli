@@ -208,7 +208,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       asJson ? json(result) : text(`Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
-    text("Usage: mir-cli canvas node <add|update|clone|delete|connect|disconnect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d>");
+    text("Usage: mir-cli canvas node <add|update|clone|delete|connect|disconnect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-vibex|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d>");
     return;
   }
 
@@ -229,6 +229,7 @@ const CANVAS_NODE_TYPES = new Set([
   "video",
   "seedance-volc",
   "seedance2-rh-standard",
+  "vibex-webapp",
   "frame-extractor",
   "llm",
   "agent",
@@ -254,6 +255,8 @@ const CANVAS_NODE_TYPES = new Set([
 ]);
 
 const MATERIAL_NODE_TYPES = new Set(["image-item", "video-item", "audio", "file", "text"]);
+const VIBEX_SEEDANCE_APP_URL =
+  "https://vibex.runninghub.cn/p/app-9105545b19ba4f339164bd5125d177a9/?inviteCode=rh-v1118&mvfxBridge=20260626-sso-callback&mvfxNode=1";
 
 const NODE_ACTION_ALIASES: Record<string, string> = {
   "add-text": "text",
@@ -268,6 +271,8 @@ const NODE_ACTION_ALIASES: Record<string, string> = {
   "add-seedance": "seedance",
   "add-seedance-volc": "seedance-volc",
   "add-seedance-rh": "seedance2-rh-standard",
+  "add-vibex": "vibex-webapp",
+  "add-vibex-webapp": "vibex-webapp",
   "add-runninghub": "runninghub",
   "add-pro-camera": "pro-camera",
   "add-panorama-gen": "panorama-gen",
@@ -1248,6 +1253,7 @@ function defaultShapeForNode(type: string): { width: number; height: number } {
   if (type === "panorama-gen") return { width: 360, height: 320 };
   if (type === "blocking-3d") return { width: 640, height: 520 };
   if (type === "runninghub" || type === "seedance2-runninghub" || type === "sora2-runninghub") return { width: 340, height: 520 };
+  if (type === "vibex-webapp") return { width: 860, height: 640 };
   if (type === "seedance-volc" || type === "seedance2-rh-standard") return { width: 420, height: 580 };
   if (type === "video-item") return { width: 320, height: 240 };
   if (type === "audio") return { width: 300, height: 100 };
@@ -1269,6 +1275,7 @@ function defaultTitleForNode(type: string): string | undefined {
     suno: "Suno 音乐",
     "seedance-volc": "seedance2.0-火山版",
     "seedance2-rh-standard": "seedance2.0-RH版",
+    "vibex-webapp": "seedance2.0限时7.5折",
     runninghub: "RunningHub",
     "seedance2-runninghub": "Seedance RunningHub",
     "sora2-runninghub": "Sora RunningHub",
@@ -1312,6 +1319,20 @@ function defaultDataForNode(type: string): Record<string, unknown> {
       conversionSlots: ["all"],
       returnLastFrame: false,
       seed: -1,
+    };
+  }
+  if (type === "vibex-webapp") {
+    return {
+      webApp: {
+        appUrl: VIBEX_SEEDANCE_APP_URL,
+        provider: "vibex",
+        authMode: "runninghub-user-login",
+      },
+      ratio: "adaptive",
+      resolution: "720p",
+      duration: "5",
+      generateAudio: true,
+      returnLastFrame: false,
     };
   }
   if (type === "panorama-gen") {
