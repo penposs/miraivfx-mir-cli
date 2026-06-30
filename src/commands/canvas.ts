@@ -543,7 +543,7 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
   }
   const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt") ?? "";
   const rawTitle = getFlagValue(args, "--title");
-  const title = getFlagValue(args, "--node-title") ?? (nodeType === "suno" ? undefined : rawTitle) ?? defaultTitleForNode(nodeType);
+  const title = getFlagValue(args, "--node-title") ?? defaultTitleForNode(nodeType);
   const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
   const requestedY = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
   const shape = defaultShapeForNode(nodeType);
@@ -556,7 +556,7 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
   const status = getFlagValue(args, "--status") ?? defaultStatusForNode(nodeType, content);
   const model = getFlagValue(args, "--model");
   const dataJson = parseSettings(getFlagValue(args, "--data-json")) ?? {};
-  const nodeData = normalizeNodeDataForType(nodeType, args, content, title, dataJson);
+  const nodeData = normalizeNodeDataForType(nodeType, args, content, rawTitle, dataJson);
   const settings = parseSettings(getFlagValue(args, "--settings-json"));
   const connectTo = getFlagValue(args, "--connect-to");
 
@@ -643,7 +643,7 @@ async function addImageNode(api: ApiClient, args: string[], appBase: string): Pr
   const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
   const prompt = getFlagValue(args, "--prompt") ?? "";
   const model = getFlagValue(args, "--model");
-  const title = getFlagValue(args, "--title") ?? "AI 生图";
+  const title = getFlagValue(args, "--node-title") ?? "AI 生图";
   const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
   const requestedY = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
   const shape = defaultShapeForNode("image");
@@ -795,7 +795,7 @@ async function updateCanvasNode(api: ApiClient, args: string[], appBase: string)
   const model = getFlagValue(args, "--model");
 
   const nodeType = String((node as any).type || "");
-  const title = getFlagValue(args, "--node-title") ?? (nodeType === "suno" ? undefined : rawTitle);
+  const title = getFlagValue(args, "--node-title");
   if (title !== undefined) patch.title = title;
   if (content !== undefined) patch.content = content;
   if (x !== undefined) patch.x = x;
@@ -862,7 +862,7 @@ async function cloneCanvasNode(api: ApiClient, args: string[], appBase: string):
   );
   const x = position.x;
   const y = position.y;
-  const title = getFlagValue(args, "--title") ?? `${String(source.title || source.type || "Node")} v2`;
+  const title = getFlagValue(args, "--node-title") ?? String(source.title || source.type || "Node");
   const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt") ?? String(source.content || "");
   const dataJson = parseSettings(getFlagValue(args, "--data-json")) ?? {};
   const settings = parseSettings(getFlagValue(args, "--settings-json"));
@@ -915,7 +915,7 @@ async function addReferenceImageNode(api: ApiClient, args: string[], appBase: st
   const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
   const imageUrl = requireValue(getFlagValue(args, "--url"), "--url");
   validateCanvasAssetUrl(imageUrl);
-  const title = getFlagValue(args, "--title") ?? "参考图";
+  const title = getFlagValue(args, "--node-title") ?? "参考图";
   const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
   const requestedY = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
   const connectTo = getFlagValue(args, "--connect-to");

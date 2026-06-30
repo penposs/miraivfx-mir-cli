@@ -72,7 +72,7 @@ mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_
 Supported node types are reported by `mir-cli canvas capabilities --json`.
 When `--x`/`--y` are omitted, the CLI picks a non-overlapping position from the current canvas. `add-reference-image` reuses an existing material node with the same URL by default; use `--force-new` or `--duplicate` only when a second visible copy is intentional.
 Use `add-suno` for music or song generation. It accepts `--lyrics`, `--song-title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, and `--instrumental`, and maps them to the Suno node fields used by the web canvas.
-For Suno nodes, `--title` is treated as the song title for compatibility. Use `--node-title` only when you intentionally want to rename the canvas node header.
+For Suno nodes, `--title` is treated as the song title for compatibility. Node headers are visual labels; use `--node-title` only when you intentionally want to rename a canvas node header.
 
 Common direct field mappings:
 
@@ -97,7 +97,7 @@ Use connections to reuse shared assets across multiple generation nodes.
 ## Update Existing Nodes
 
 ```powershell
-mir-cli canvas node update --canvas-id <canvas_id> --node-id <node_id> --title "New title" --yes --json
+mir-cli canvas node update --canvas-id <canvas_id> --node-id <node_id> --node-title "New node header" --yes --json
 mir-cli canvas node update --canvas-id <canvas_id> --node-id <node_id> --prompt "Updated prompt" --yes --json
 mir-cli canvas node update --canvas-id <canvas_id> --node-id <node_id> --data-json "{\"ratio\":\"16:9\",\"duration\":\"15\"}" --yes --json
 mir-cli canvas node update --canvas-id <canvas_id> --node-id <node_id> --x 900 --y 120 --width 420 --height 580 --yes --json
@@ -108,7 +108,7 @@ Before updating, agents should inspect the canvas and identify the exact node id
 ## Clone For Iteration
 
 ```powershell
-mir-cli canvas node clone --canvas-id <canvas_id> --node-id <node_id> --title "Shot 03 v2" --copy-inputs --yes --json
+mir-cli canvas node clone --canvas-id <canvas_id> --node-id <node_id> --node-title "Shot 03 v2" --copy-inputs --yes --json
 mir-cli canvas node clone --canvas-id <canvas_id> --node-id <node_id> --prompt "More cinematic version" --x 1400 --y 600 --copy-inputs --yes --json
 ```
 

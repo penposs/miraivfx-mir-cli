@@ -143,7 +143,7 @@ mir-cli canvas node add-suno --canvas-id <canvas_id> --song-title "Velvet Afterg
 ```
 
 Use `add-suno` for music or song generation requests. The CLI writes lyrics into the Suno lyrics field, not a plain text note.
-For Suno nodes, `--title` is treated as the song title for compatibility. Use `--node-title` only when you intentionally want to rename the canvas node header.
+For Suno nodes, `--title` is treated as the song title for compatibility. Node headers are visual labels; use `--node-title` only when you intentionally want to rename a canvas node header.
 
 Common generation node fields can be passed directly without `--data-json`:
 
@@ -187,7 +187,7 @@ mir-cli canvas node update --canvas-id <canvas_id> --node-id <node_id> --prompt 
 Clone a node for a new version:
 
 ```powershell
-mir-cli canvas node clone --canvas-id <canvas_id> --node-id <node_id> --copy-inputs --title "Shot 03 v2" --yes --json
+mir-cli canvas node clone --canvas-id <canvas_id> --node-id <node_id> --copy-inputs --node-title "Shot 03 v2" --yes --json
 ```
 
 Disconnect two nodes:
