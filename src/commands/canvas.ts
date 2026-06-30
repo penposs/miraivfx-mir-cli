@@ -555,7 +555,7 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
   const status = getFlagValue(args, "--status") ?? defaultStatusForNode(nodeType, content);
   const model = getFlagValue(args, "--model");
   const dataJson = parseSettings(getFlagValue(args, "--data-json")) ?? {};
-  const nodeData = nodeType === "suno" ? normalizeSunoData(args, content, title, dataJson) : dataJson;
+  const nodeData = normalizeNodeDataForType(nodeType, args, content, title, dataJson);
   const settings = parseSettings(getFlagValue(args, "--settings-json"));
   const connectTo = getFlagValue(args, "--connect-to");
 
@@ -805,8 +805,9 @@ async function updateCanvasNode(api: ApiClient, args: string[], appBase: string)
     const modelTask = modelTaskForNode(nodeType);
     if (modelTask) await assertModelAvailable(api, modelTask, model);
   }
+  const normalizedDataPatch = normalizeNodeDataForType(nodeType, args, content ?? "", title, dataJson ?? {});
   const dataPatch = {
-    ...(dataJson ?? {}),
+    ...normalizedDataPatch,
     ...(settings ? { settings } : {}),
     ...(content !== undefined && !MATERIAL_NODE_TYPES.has(nodeType) ? { prompt: content } : {}),
     ...(model ? modelDataForNode(nodeType, model) : {}),
@@ -1354,6 +1355,33 @@ function defaultDataForNode(type: string): Record<string, unknown> {
   return {};
 }
 
+function normalizeNodeDataForType(
+  type: string,
+  args: string[],
+  content: string,
+  nodeTitle: string | undefined,
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const normalized = { ...data };
+
+  if (type === "suno") return normalizeSunoData(args, content, nodeTitle, normalized);
+  if (type === "image") return normalizeImageData(args, normalized);
+  if (type === "video") return normalizeVideoData(args, normalized);
+  if (type === "llm" || type === "agent" || type === "seedance") return normalizeLlmData(args, normalized);
+  if (type === "seedance-volc" || type === "seedance2-rh-standard") return normalizeSeedanceVideoData(type, args, normalized);
+  if (type === "vibex-webapp") return normalizeVibexData(args, normalized);
+  if (type === "runninghub" || type === "seedance2-runninghub" || type === "sora2-runninghub") {
+    return normalizeRunningHubData(args, normalized);
+  }
+  if (type === "upscale") return normalizeUpscaleData(args, normalized);
+  if (type === "resize") return normalizeResizeData(args, normalized);
+  if (type === "frame-extractor") return normalizeFrameExtractorData(args, content, normalized);
+  if (type === "smart-split") return normalizeSmartSplitData(args, normalized);
+  if (type === "panorama-gen") return normalizePanoramaGenData(args, normalized);
+
+  return normalized;
+}
+
 function normalizeSunoData(
   args: string[],
   content: string,
@@ -1421,6 +1449,176 @@ function normalizeSunoData(
   };
 }
 
+function normalizeImageData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const aspectRatio = firstString(getFlagValue(args, "--aspect-ratio"), getFlagValue(args, "--ratio"), data.aspectRatio, data.aspect_ratio);
+  const resolution = firstString(getFlagValue(args, "--resolution"), getFlagValue(args, "--size"), data.resolution);
+  const negativePrompt = firstString(getFlagValue(args, "--negative-prompt"), getFlagValue(args, "--negative"), data.negative_prompt);
+  const pendingRefImage = firstString(getFlagValue(args, "--reference-image"), getFlagValue(args, "--ref-image"), data.pendingRefImage);
+
+  return {
+    ...data,
+    ...(aspectRatio ? { aspectRatio, aspect_ratio: aspectRatio } : {}),
+    ...(resolution ? { resolution } : {}),
+    ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
+    ...(pendingRefImage ? { pendingRefImage } : {}),
+    ...booleanFlag(args, "--pre-llm", "preLlmEnabled"),
+  };
+}
+
+function normalizeVideoData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const duration = firstString(getFlagValue(args, "--duration"), getFlagValue(args, "--seconds"), data.duration);
+  const videoService = firstString(getFlagValue(args, "--service"), getFlagValue(args, "--video-service"), data.videoService);
+  const videoModel = firstString(getFlagValue(args, "--video-model"), data.videoModel);
+  const videoSize = firstString(getFlagValue(args, "--video-size"), getFlagValue(args, "--size"), data.videoSize);
+  const veoMode = firstString(getFlagValue(args, "--veo-mode"), data.veoMode);
+  const veoModel = firstString(getFlagValue(args, "--veo-model"), data.veoModel);
+  const veoAspectRatio = firstString(getFlagValue(args, "--veo-aspect-ratio"), getFlagValue(args, "--aspect-ratio"), getFlagValue(args, "--ratio"), data.veoAspectRatio);
+
+  return {
+    ...data,
+    ...(duration ? { duration, videoSeconds: duration } : {}),
+    ...(videoService === "sora" || videoService === "veo" ? { videoService } : {}),
+    ...(videoModel ? { videoModel } : {}),
+    ...(videoSize ? { videoSize } : {}),
+    ...(veoMode ? { veoMode } : {}),
+    ...(veoModel ? { veoModel } : {}),
+    ...(veoAspectRatio ? { veoAspectRatio } : {}),
+    ...booleanFlag(args, "--veo-enhance-prompt", "veoEnhancePrompt"),
+    ...booleanFlag(args, "--veo-enable-upsample", "veoEnableUpsample"),
+    ...booleanFlag(args, "--pre-llm", "preLlmEnabled"),
+  };
+}
+
+function normalizeLlmData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const mode = firstString(getFlagValue(args, "--mode"), data.mode);
+  const systemPrompt = firstString(getFlagValue(args, "--system-prompt"), getFlagValue(args, "--system"), data.systemPrompt, data.systemInstruction);
+  const llmModel = firstString(getFlagValue(args, "--llm-model"), getFlagValue(args, "--model"), data.llmModel);
+
+  return {
+    ...data,
+    ...(mode ? { mode } : {}),
+    ...(systemPrompt ? { systemPrompt, systemInstruction: systemPrompt } : {}),
+    ...(llmModel ? { llmModel } : {}),
+    ...booleanFlag(args, "--hide-output", "hideOutput"),
+  };
+}
+
+function normalizeSeedanceVideoData(type: string, args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const ratio = firstString(getFlagValue(args, "--ratio"), getFlagValue(args, "--aspect-ratio"), data.ratio, data.aspectRatio);
+  const resolution = firstString(getFlagValue(args, "--resolution"), getFlagValue(args, "--size"), data.resolution);
+  const duration = firstString(getFlagValue(args, "--duration"), getFlagValue(args, "--seconds"), data.duration);
+  const apiKey = firstString(getFlagValue(args, "--api-key"), getFlagValue(args, "--apikey"), data.apiKey);
+  const conversionSlots = parseCsv(firstString(getFlagValue(args, "--conversion-slots"), data.conversionSlots));
+  const seed = parseOptionalNumber(getFlagValue(args, "--seed"), "--seed");
+
+  return {
+    ...data,
+    ...(ratio ? { ratio, aspectRatio: ratio } : {}),
+    ...(resolution ? { resolution } : {}),
+    ...(duration ? { duration } : {}),
+    ...(apiKey ? { apiKey } : {}),
+    ...(conversionSlots ? { conversionSlots } : {}),
+    ...(seed !== undefined ? { seed } : {}),
+    ...booleanPairFlag(args, "--generate-audio", "--no-audio", type === "seedance-volc" ? "generate_audio" : "generateAudio"),
+    ...booleanPairFlag(args, "--watermark", "--no-watermark", "watermark"),
+    ...booleanPairFlag(args, "--real-person-mode", "--no-real-person-mode", "realPersonMode"),
+    ...booleanFlag(args, "--return-last-frame", "returnLastFrame"),
+  };
+}
+
+function normalizeVibexData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const appUrl = firstString(getFlagValue(args, "--app-url"), getFlagValue(args, "--webapp-url"));
+  const authState = firstString(getFlagValue(args, "--auth-state"), data.webApp && (data.webApp as Record<string, unknown>).authState);
+  const webApp = {
+    ...((data.webApp && typeof data.webApp === "object" && !Array.isArray(data.webApp)) ? data.webApp as Record<string, unknown> : {}),
+    ...(appUrl ? { appUrl } : {}),
+    ...(authState ? { authState } : {}),
+  };
+  return Object.keys(webApp).length ? { ...data, webApp } : data;
+}
+
+function normalizeRunningHubData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const current = (data.runninghub && typeof data.runninghub === "object" && !Array.isArray(data.runninghub))
+    ? data.runninghub as Record<string, unknown>
+    : {};
+  const webappId = firstString(getFlagValue(args, "--webapp-id"), getFlagValue(args, "--app-id"), current.webappId, data.webappId);
+  const apiKey = firstString(getFlagValue(args, "--api-key"), getFlagValue(args, "--apikey"), current.apiKey);
+  const environment = firstString(getFlagValue(args, "--environment"), getFlagValue(args, "--env"), current.environment);
+  const values = parseSettings(getFlagValue(args, "--values-json"));
+  const runninghub = {
+    ...current,
+    ...(webappId ? { webappId } : {}),
+    ...(apiKey ? { apiKey } : {}),
+    ...(environment ? { environment } : {}),
+    ...(values ? { values: { ...((current.values && typeof current.values === "object") ? current.values as Record<string, unknown> : {}), ...values } } : {}),
+  };
+  return {
+    ...data,
+    ...(webappId ? { webappId } : {}),
+    runninghub,
+  };
+}
+
+function normalizeUpscaleData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const resolution = firstString(getFlagValue(args, "--upscale-resolution"), getFlagValue(args, "--resolution"), data.resolution, data.upscaleResolution);
+  const aspectRatio = firstString(getFlagValue(args, "--aspect-ratio"), getFlagValue(args, "--ratio"), data.aspect_ratio, data.aspectRatio);
+  return {
+    ...data,
+    ...(resolution ? { resolution, upscaleResolution: resolution } : {}),
+    ...(aspectRatio ? { aspect_ratio: aspectRatio, aspectRatio } : {}),
+  };
+}
+
+function normalizeResizeData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const resizeMode = firstString(getFlagValue(args, "--resize-mode"), getFlagValue(args, "--mode"), data.resizeMode);
+  const resizeWidth = parseOptionalNumber(getFlagValue(args, "--resize-width") ?? getFlagValue(args, "--target-width"), "--resize-width");
+  const resizeHeight = parseOptionalNumber(getFlagValue(args, "--resize-height") ?? getFlagValue(args, "--target-height"), "--resize-height");
+  const sourceImageUrl = firstString(getFlagValue(args, "--source-image-url"), getFlagValue(args, "--image-url"), data.sourceImageUrl);
+  return {
+    ...data,
+    ...(resizeMode ? { resizeMode } : {}),
+    ...(resizeWidth !== undefined ? { resizeWidth } : {}),
+    ...(resizeHeight !== undefined ? { resizeHeight } : {}),
+    ...(sourceImageUrl ? { sourceImageUrl } : {}),
+  };
+}
+
+function normalizeFrameExtractorData(args: string[], content: string, data: Record<string, unknown>): Record<string, unknown> {
+  const sourceVideoUrl = firstString(getFlagValue(args, "--source-video-url"), getFlagValue(args, "--video-url"), data.sourceVideoUrl, content);
+  const currentFrameTime = parseOptionalNumber(getFlagValue(args, "--current-frame-time") ?? getFlagValue(args, "--time"), "--current-frame-time");
+  const videoDuration = parseOptionalNumber(getFlagValue(args, "--video-duration"), "--video-duration");
+  return {
+    ...data,
+    ...(sourceVideoUrl ? { sourceVideoUrl } : {}),
+    ...(currentFrameTime !== undefined ? { currentFrameTime } : {}),
+    ...(videoDuration !== undefined ? { videoDuration } : {}),
+  };
+}
+
+function normalizeSmartSplitData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const splitRows = parseOptionalNumber(getFlagValue(args, "--split-rows") ?? getFlagValue(args, "--rows"), "--split-rows");
+  const splitCols = parseOptionalNumber(getFlagValue(args, "--split-cols") ?? getFlagValue(args, "--cols") ?? getFlagValue(args, "--columns"), "--split-cols");
+  const sourceImageUrl = firstString(getFlagValue(args, "--source-image-url"), getFlagValue(args, "--image-url"), data.sourceImageUrl);
+  return {
+    ...data,
+    ...(splitRows !== undefined ? { splitRows } : {}),
+    ...(splitCols !== undefined ? { splitCols } : {}),
+    ...(sourceImageUrl ? { sourceImageUrl } : {}),
+    ...booleanPairFlag(args, "--upscale2k", "--no-upscale2k", "upscale2k"),
+  };
+}
+
+function normalizePanoramaGenData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const supplementPrompt = firstString(getFlagValue(args, "--supplement-prompt"), getFlagValue(args, "--panorama-prompt"), data.panoramaSupplementPrompt);
+  const quality = firstString(getFlagValue(args, "--quality"), getFlagValue(args, "--panorama-quality"), data.panoramaQuality);
+  return {
+    ...data,
+    ...(supplementPrompt ? { panoramaSupplementPrompt: supplementPrompt } : {}),
+    ...(quality === "2k" || quality === "4k" ? { panoramaQuality: quality } : {}),
+    ...booleanFlag(args, "--pre-llm", "preLlmEnabled"),
+  };
+}
+
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
     if (typeof value !== "string") continue;
@@ -1428,6 +1626,24 @@ function firstString(...values: unknown[]): string | undefined {
     if (trimmed) return trimmed;
   }
   return undefined;
+}
+
+function parseCsv(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) return value.map(item => String(item).trim()).filter(Boolean);
+  if (typeof value !== "string") return undefined;
+  const items = value.split(",").map(item => item.trim()).filter(Boolean);
+  return items.length ? items : undefined;
+}
+
+function booleanFlag(args: string[], flag: string, field: string): Record<string, boolean> {
+  if (!hasFlag(args, flag)) return {};
+  return { [field]: true };
+}
+
+function booleanPairFlag(args: string[], trueFlag: string, falseFlag: string, field: string): Record<string, boolean> {
+  if (hasFlag(args, trueFlag)) return { [field]: true };
+  if (hasFlag(args, falseFlag)) return { [field]: false };
+  return {};
 }
 
 function materialDataForNode(type: string, url: string): Record<string, unknown> {

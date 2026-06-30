@@ -133,7 +133,7 @@ mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Planning 
 Add a video generation node:
 
 ```powershell
-mir-cli canvas node add --canvas-id <canvas_id> --type seedance2-rh-standard --prompt "Video prompt" --data-json "{\"ratio\":\"16:9\",\"duration\":\"12\"}" --yes --json
+mir-cli canvas node add-seedance-rh --canvas-id <canvas_id> --prompt "Video prompt" --ratio "16:9" --duration 12 --resolution 720p --yes --json
 ```
 
 Add a Suno music generation node with custom lyrics:
@@ -143,6 +143,15 @@ mir-cli canvas node add-suno --canvas-id <canvas_id> --song-title "Velvet Afterg
 ```
 
 Use `add-suno` for music or song generation requests. The CLI writes lyrics into the Suno lyrics field, not a plain text note.
+
+Common generation node fields can be passed directly without `--data-json`:
+
+```powershell
+mir-cli canvas node add-video --canvas-id <canvas_id> --prompt "A cinematic shot" --duration 10 --video-service veo --yes --json
+mir-cli canvas node add-upscale --canvas-id <canvas_id> --upscale-resolution 4K --yes --json
+mir-cli canvas node add-smart-split --canvas-id <canvas_id> --split-rows 3 --split-cols 4 --upscale2k --yes --json
+mir-cli canvas node add-runninghub --canvas-id <canvas_id> --webapp-id <app_id> --api-key <saved_key_name> --values-json "{\"node|field\":\"value\"}" --yes --json
+```
 
 Upload a local file you selected:
 

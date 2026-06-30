@@ -27,6 +27,15 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 13. Use `mir-cli canvas node delete --node-id <node_id> --yes` only for exact user-confirmed node ids.
 14. Open the canvas for the user to review and run generation in Miraivfx.
 
+## Direct Field Mapping
+
+- Prefer direct flags over `--data-json` for common generation fields.
+- Suno: `--lyrics`, `--song-title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, `--instrumental`.
+- Image/video: `--ratio`/`--aspect-ratio`, `--resolution`/`--size`, `--duration`, `--negative-prompt`, `--video-service`, `--video-model`, `--video-size`.
+- Seedance video: `--ratio`, `--resolution`, `--duration`, `--api-key`, `--generate-audio`/`--no-audio`, `--real-person-mode`/`--no-real-person-mode`, `--conversion-slots`, `--seed`.
+- RunningHub: `--webapp-id`, `--api-key`, `--environment`, `--values-json`.
+- Action nodes: use `--upscale-resolution`, `--resize-mode`, `--resize-width`, `--resize-height`, `--split-rows`, `--split-cols`, `--source-video-url`, `--current-frame-time`, `--supplement-prompt`, and `--quality` when applicable.
+
 ## Canvas Layout And Asset Reuse Rules
 
 - In one canvas-building operation, upload each unique local asset once and create at most one visible material node for that asset. Reuse it by adding connections to every generation/action node that needs it.
