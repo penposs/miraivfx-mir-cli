@@ -65,11 +65,13 @@ The CLI caches uploads by local file sha256 and project id. Use `--force-upload`
 mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Planning note" --yes --json
 mir-cli canvas node add --canvas-id <canvas_id> --type video --prompt "A cinematic shot" --model <model_id> --yes --json
 mir-cli canvas node add --canvas-id <canvas_id> --type seedance2-rh-standard --prompt "Video prompt" --data-json "{\"ratio\":\"16:9\",\"duration\":\"12\"}" --yes --json
+mir-cli canvas node add-suno --canvas-id <canvas_id> --song-title "Velvet Afterglow" --style "R&B, smooth soul" --lyrics "[Verse]..." --yes --json
 mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_image_url> --yes --json
 ```
 
 Supported node types are reported by `mir-cli canvas capabilities --json`.
 When `--x`/`--y` are omitted, the CLI picks a non-overlapping position from the current canvas. `add-reference-image` reuses an existing material node with the same URL by default; use `--force-new` or `--duplicate` only when a second visible copy is intentional.
+Use `add-suno` for music or song generation. It accepts `--lyrics`, `--song-title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, and `--instrumental`, and maps them to the Suno node fields used by the web canvas.
 
 Common aliases include `add-text`, `add-video`, `add-audio`, `add-video-reference`, `add-agent`, `add-suno`, `add-seedance`, `add-seedance-volc`, `add-seedance-rh`, `add-vibex`, `add-runninghub`, `add-pro-camera`, `add-panorama-gen`, `add-blocking-3d`, `add-drawing-board`, `add-frame-extractor`, `add-upscale`, `add-resize`, `add-smart-split`, `add-panorama-split`, and `add-relay`.
 

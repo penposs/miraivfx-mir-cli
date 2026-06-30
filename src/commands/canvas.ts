@@ -555,6 +555,7 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
   const status = getFlagValue(args, "--status") ?? defaultStatusForNode(nodeType, content);
   const model = getFlagValue(args, "--model");
   const dataJson = parseSettings(getFlagValue(args, "--data-json")) ?? {};
+  const nodeData = nodeType === "suno" ? normalizeSunoData(args, content, title, dataJson) : dataJson;
   const settings = parseSettings(getFlagValue(args, "--settings-json"));
   const connectTo = getFlagValue(args, "--connect-to");
 
@@ -579,9 +580,9 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
     title,
     data: {
       ...defaultDataForNode(nodeType),
-      ...dataJson,
+      ...nodeData,
       ...(settings ? { settings } : {}),
-      ...(content && !MATERIAL_NODE_TYPES.has(nodeType) ? { prompt: content } : {}),
+      ...(content && !MATERIAL_NODE_TYPES.has(nodeType) && nodeType !== "suno" ? { prompt: content } : {}),
       ...(content && MATERIAL_NODE_TYPES.has(nodeType) && looksLikeUrl(content) ? materialDataForNode(nodeType, content) : {}),
       ...(model ? modelDataForNode(nodeType, model) : {}),
       createdBy: "mir-cli",
@@ -1351,6 +1352,82 @@ function defaultDataForNode(type: string): Record<string, unknown> {
     return { splitRows: 3, splitCols: 3, upscale2k: false };
   }
   return {};
+}
+
+function normalizeSunoData(
+  args: string[],
+  content: string,
+  nodeTitle: string | undefined,
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const lyrics = firstString(
+    getFlagValue(args, "--lyrics"),
+    getFlagValue(args, "--lyric"),
+    getFlagValue(args, "--prompt"),
+    data.sunoLyrics,
+    data.lyrics,
+    data.prompt,
+  );
+  const songTitle = firstString(
+    getFlagValue(args, "--song-title"),
+    getFlagValue(args, "--music-title"),
+    data.sunoTitle,
+    data.title,
+    nodeTitle && nodeTitle !== defaultTitleForNode("suno") ? nodeTitle : undefined,
+  );
+  const tags = firstString(
+    getFlagValue(args, "--style"),
+    getFlagValue(args, "--tags"),
+    data.sunoTags,
+    data.sunoStyle,
+    data.tags,
+  );
+  const negativeTags = firstString(
+    getFlagValue(args, "--negative-tags"),
+    getFlagValue(args, "--negative"),
+    data.sunoNegativeTags,
+    data.negative_tags,
+  );
+  const description = firstString(
+    getFlagValue(args, "--description"),
+    data.sunoDescription,
+    data.gpt_description_prompt,
+    content,
+  );
+  const version = firstString(getFlagValue(args, "--version"), data.sunoVersion, data.mv, "chirp-fenix");
+  const model = firstString(getFlagValue(args, "--model"), data.sunoModel, data.model, "suno");
+  const instrumental = hasFlag(args, "--instrumental")
+    ? true
+    : data.sunoInstrumental ?? data.make_instrumental ?? false;
+  const explicitMode = firstString(getFlagValue(args, "--mode"), data.sunoMode, data.mode);
+  const mode = explicitMode === "description" || explicitMode === "custom"
+    ? explicitMode
+    : lyrics || songTitle || tags
+      ? "custom"
+      : "description";
+
+  return {
+    ...data,
+    model,
+    sunoModel: model,
+    sunoVersion: version,
+    sunoMode: mode,
+    sunoInstrumental: Boolean(instrumental),
+    ...(description ? { sunoDescription: description, gpt_description_prompt: description } : {}),
+    ...(songTitle ? { sunoTitle: songTitle, title: songTitle } : {}),
+    ...(tags ? { sunoTags: tags, sunoStyle: tags, tags } : {}),
+    ...(negativeTags ? { sunoNegativeTags: negativeTags, negative_tags: negativeTags } : {}),
+    ...(lyrics ? { sunoLyrics: lyrics, lyrics, prompt: lyrics } : {}),
+  };
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
 }
 
 function materialDataForNode(type: string, url: string): Record<string, unknown> {

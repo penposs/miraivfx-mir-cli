@@ -136,6 +136,14 @@ Add a video generation node:
 mir-cli canvas node add --canvas-id <canvas_id> --type seedance2-rh-standard --prompt "Video prompt" --data-json "{\"ratio\":\"16:9\",\"duration\":\"12\"}" --yes --json
 ```
 
+Add a Suno music generation node with custom lyrics:
+
+```powershell
+mir-cli canvas node add-suno --canvas-id <canvas_id> --song-title "Velvet Afterglow" --style "R&B, smooth soul, warm bass" --lyrics "[Verse]..." --yes --json
+```
+
+Use `add-suno` for music or song generation requests. The CLI writes lyrics into the Suno lyrics field, not a plain text note.
+
 Upload a local file you selected:
 
 ```powershell

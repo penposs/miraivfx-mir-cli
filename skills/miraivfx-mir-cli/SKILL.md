@@ -16,14 +16,16 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
    - `mir-cli canvas capabilities --json`
    - `mir-cli canvas models --task image --json`
    - `mir-cli canvas models --task video --json`
+   - `mir-cli canvas models --task audio --json` when creating music or song nodes.
 6. Show a concise plan and risk summary before any mutation.
 7. Use `mir-cli canvas upload --allow-upload` only when the user explicitly asked to upload a local asset.
 8. Use `mir-cli canvas node add --type <node-type> ... --yes` only to append allowed nodes and connections. Read `mir-cli canvas capabilities --json` for supported node types.
-9. Use `mir-cli canvas node connect --from-node <asset_node_id> --to-node <generation_node_id> --yes` to reuse an existing asset node across multiple generation nodes.
-10. For second versions or creative iteration, prefer `mir-cli canvas node clone --copy-inputs --yes` unless the user explicitly asks to edit the original node.
-11. Use `mir-cli canvas node update --node-id <node_id> ... --yes` only after inspecting the canvas and identifying the exact node id.
-12. Use `mir-cli canvas node delete --node-id <node_id> --yes` only for exact user-confirmed node ids.
-13. Open the canvas for the user to review and run generation in Miraivfx.
+9. For music, song, R&B, lyrics, Suno, or audio generation requests, use `mir-cli canvas node add-suno --song-title ... --style ... --lyrics ... --yes --json`. Do not create a plain `text` node for lyrics unless the user explicitly asks for a note only.
+10. Use `mir-cli canvas node connect --from-node <asset_node_id> --to-node <generation_node_id> --yes` to reuse an existing asset node across multiple generation nodes.
+11. For second versions or creative iteration, prefer `mir-cli canvas node clone --copy-inputs --yes` unless the user explicitly asks to edit the original node.
+12. Use `mir-cli canvas node update --node-id <node_id> ... --yes` only after inspecting the canvas and identifying the exact node id.
+13. Use `mir-cli canvas node delete --node-id <node_id> --yes` only for exact user-confirmed node ids.
+14. Open the canvas for the user to review and run generation in Miraivfx.
 
 ## Canvas Layout And Asset Reuse Rules
 
