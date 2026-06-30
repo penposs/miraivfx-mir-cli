@@ -542,7 +542,8 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
     throw new Error(`Unsupported node type: ${nodeType}`);
   }
   const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt") ?? "";
-  const title = getFlagValue(args, "--title") ?? defaultTitleForNode(nodeType);
+  const rawTitle = getFlagValue(args, "--title");
+  const title = getFlagValue(args, "--node-title") ?? (nodeType === "suno" ? undefined : rawTitle) ?? defaultTitleForNode(nodeType);
   const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
   const requestedY = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
   const shape = defaultShapeForNode(nodeType);
@@ -783,7 +784,7 @@ async function updateCanvasNode(api: ApiClient, args: string[], appBase: string)
   const canvas = await getCanvasData(api, canvasId);
   const node = findCanvasNode(canvas, nodeId);
   const patch: Record<string, unknown> = {};
-  const title = getFlagValue(args, "--title");
+  const rawTitle = getFlagValue(args, "--title");
   const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt");
   const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
   const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
@@ -793,6 +794,8 @@ async function updateCanvasNode(api: ApiClient, args: string[], appBase: string)
   const settings = parseSettings(getFlagValue(args, "--settings-json"));
   const model = getFlagValue(args, "--model");
 
+  const nodeType = String((node as any).type || "");
+  const title = getFlagValue(args, "--node-title") ?? (nodeType === "suno" ? undefined : rawTitle);
   if (title !== undefined) patch.title = title;
   if (content !== undefined) patch.content = content;
   if (x !== undefined) patch.x = x;
@@ -800,12 +803,11 @@ async function updateCanvasNode(api: ApiClient, args: string[], appBase: string)
   if (width !== undefined) patch.width = width;
   if (height !== undefined) patch.height = height;
 
-  const nodeType = String((node as any).type || "");
   if (model) {
     const modelTask = modelTaskForNode(nodeType);
     if (modelTask) await assertModelAvailable(api, modelTask, model);
   }
-  const normalizedDataPatch = normalizeNodeDataForType(nodeType, args, content ?? "", title, dataJson ?? {});
+  const normalizedDataPatch = normalizeNodeDataForType(nodeType, args, content ?? "", rawTitle ?? title, dataJson ?? {});
   const dataPatch = {
     ...normalizedDataPatch,
     ...(settings ? { settings } : {}),
@@ -1385,7 +1387,7 @@ function normalizeNodeDataForType(
 function normalizeSunoData(
   args: string[],
   content: string,
-  nodeTitle: string | undefined,
+  _nodeTitle: string | undefined,
   data: Record<string, unknown>,
 ): Record<string, unknown> {
   const lyrics = firstString(
@@ -1399,9 +1401,9 @@ function normalizeSunoData(
   const songTitle = firstString(
     getFlagValue(args, "--song-title"),
     getFlagValue(args, "--music-title"),
+    getFlagValue(args, "--title"),
     data.sunoTitle,
     data.title,
-    nodeTitle && nodeTitle !== defaultTitleForNode("suno") ? nodeTitle : undefined,
   );
   const tags = firstString(
     getFlagValue(args, "--style"),

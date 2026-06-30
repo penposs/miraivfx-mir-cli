@@ -30,7 +30,7 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 ## Direct Field Mapping
 
 - Prefer direct flags over `--data-json` for common generation fields.
-- Suno: `--lyrics`, `--song-title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, `--instrumental`.
+- Suno: `--lyrics`, `--song-title`, `--title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, `--instrumental`. For Suno, `--title` means song title; use `--node-title` only when intentionally renaming the canvas node header.
 - Image/video: `--ratio`/`--aspect-ratio`, `--resolution`/`--size`, `--duration`, `--negative-prompt`, `--video-service`, `--video-model`, `--video-size`.
 - Seedance video: `--ratio`, `--resolution`, `--duration`, `--api-key`, `--generate-audio`/`--no-audio`, `--real-person-mode`/`--no-real-person-mode`, `--conversion-slots`, `--seed`.
 - RunningHub: `--webapp-id`, `--api-key`, `--environment`, `--values-json`.

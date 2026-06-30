@@ -72,6 +72,7 @@ mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_
 Supported node types are reported by `mir-cli canvas capabilities --json`.
 When `--x`/`--y` are omitted, the CLI picks a non-overlapping position from the current canvas. `add-reference-image` reuses an existing material node with the same URL by default; use `--force-new` or `--duplicate` only when a second visible copy is intentional.
 Use `add-suno` for music or song generation. It accepts `--lyrics`, `--song-title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, and `--instrumental`, and maps them to the Suno node fields used by the web canvas.
+For Suno nodes, `--title` is treated as the song title for compatibility. Use `--node-title` only when you intentionally want to rename the canvas node header.
 
 Common direct field mappings:
 
