@@ -150,10 +150,24 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
 
   if (subcommand === "v-camera") {
     const action = args[0] ?? "";
+    if (
+      action === "--help"
+      || action === "-h"
+      || action === "help"
+      || hasFlag(args.slice(1), "--help")
+      || hasFlag(args.slice(1), "-h")
+    ) {
+      text(vCameraUsage());
+      return;
+    }
     if (action === "create") {
       const result = await addGenericNode(api, ["--type", "v-camera", ...args.slice(1)], config.appBase);
       if (result.opened && typeof result.url === "string") await openUrl(result.url);
-      asJson ? json(result) : text(`Added V-camera node ${result.node_id} to ${result.canvas_id}`);
+      asJson
+        ? json(result)
+        : text(result.dry_run
+          ? `Dry run: would add V-camera node ${result.node_id} to ${result.canvas_id}`
+          : `Added V-camera node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
     if (!action) {
@@ -172,7 +186,11 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       if (result.opened && typeof result.url === "string") {
         await openUrl(result.url);
       }
-      asJson ? json(result) : text(`Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
+      asJson
+        ? json(result)
+        : text(result.dry_run
+          ? `Dry run: would add ${result.node_type} node ${result.node_id} to ${result.canvas_id}`
+          : `Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
     if (action === "connect") {
@@ -222,7 +240,11 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       if (result.opened && typeof result.url === "string") {
         await openUrl(result.url);
       }
-      asJson ? json(result) : text(`Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
+      asJson
+        ? json(result)
+        : text(result.dry_run
+          ? `Dry run: would add ${result.node_type} node ${result.node_id} to ${result.canvas_id}`
+          : `Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
     text("Usage: mir-cli canvas node <add|update|clone|delete|connect|disconnect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-vibex|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d|add-v-camera>");
@@ -551,7 +573,8 @@ function summarizeCanvas(canvas: CanvasData): Record<string, unknown> {
 }
 
 async function addGenericNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
-  if (!hasFlag(args, "--yes")) {
+  const dryRun = hasFlag(args, "--dry-run");
+  if (!dryRun && !hasFlag(args, "--yes")) {
     throw new Error("Creating a canvas node requires explicit --yes");
   }
   const shouldOpen = hasFlag(args, "--open");
@@ -625,14 +648,30 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
         toNode: connectTo,
       }
     : undefined;
+  const ops = [
+    { type: "add_node", node },
+    ...(connection ? [connection] : []),
+  ];
+
+  if (dryRun) {
+    return {
+      ok: true,
+      dry_run: true,
+      canvas_id: canvasId,
+      node_id: node.id,
+      node_type: node.type,
+      title,
+      status,
+      connected_to: connectTo ?? null,
+      opened: false,
+      ops,
+    };
+  }
 
   const update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
     conflictPolicy: "merge",
     clientModifiedAt: now,
-    ops: [
-      { type: "add_node", node },
-      ...(connection ? [connection] : []),
-    ],
+    ops,
   });
 
   if (!update.success) {

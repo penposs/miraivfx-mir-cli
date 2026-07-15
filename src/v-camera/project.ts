@@ -5,18 +5,30 @@ export type SafeFrameRatio = "off" | "9:16" | "16:9" | "1:1";
 export type CameraMovementMode = "static" | "path" | "follow";
 export type CameraAimMode = "manual" | "actor";
 export type CameraTrackingPoint = "head" | "chest" | "center";
-export type CameraMotionPreset =
-  | "push_in"
-  | "pull_out"
-  | "truck_left"
-  | "truck_right"
-  | "fixed_tracking"
-  | "lead_follow"
-  | "chase_follow"
-  | "orbit_left"
-  | "orbit_right";
+export const CAMERA_MOTION_PRESETS = [
+  "push_in",
+  "pull_out",
+  "truck_left",
+  "truck_right",
+  "fixed_tracking",
+  "lead_follow",
+  "chase_follow",
+  "orbit_left",
+  "orbit_right",
+] as const;
+export type CameraMotionPreset = typeof CAMERA_MOTION_PRESETS[number];
 
-export type PropPreset = "box" | "thin_wall" | "column" | "platform" | "obstacle" | "door_frame" | "stairs" | "slope";
+export const PROP_PRESETS = [
+  "box",
+  "thin_wall",
+  "column",
+  "platform",
+  "obstacle",
+  "door_frame",
+  "stairs",
+  "slope",
+] as const;
+export type PropPreset = typeof PROP_PRESETS[number];
 
 export interface PathPoint {
   id: string;
@@ -122,38 +134,78 @@ export function defaultVCameraProject(): VCameraProject {
 }
 
 export function normalizeProject(value: unknown): VCameraProject {
-  const source = isRecord(value) ? clone(value) : defaultVCameraProject();
+  const defaults = defaultVCameraProject();
+  const source = isRecord(value) ? clone(value) : defaults;
+  const cubes = normalizeCollection(source.cubes, "cubes", 500, normalizeProp);
+  const actors = normalizeCollection(source.actors, "actors", 200, normalizeActor);
+  const cameras = normalizeCollection(source.cameras, "cameras", 100, normalizeCameraAt);
+  const cameraCuts = normalizeCollection(source.cameraCuts, "cameraCuts", 2000, normalizeCameraCut);
+  ensureUniqueProjectIds(cubes, "cubes");
+  ensureUniqueProjectIds(actors, "actors");
+  ensureUniqueProjectIds(cameras, "cameras");
+  ensureUniqueProjectIds(cameraCuts, "cameraCuts");
   return {
-    ...defaultVCameraProject(),
+    ...defaults,
     ...source,
     version: 1,
-    cubes: Array.isArray(source.cubes) ? (source.cubes as Prop[]).map(normalizePathOwner) : [],
-    actors: Array.isArray(source.actors) ? (source.actors as Actor[]).map(normalizePathOwner) : [],
-    cameras: Array.isArray(source.cameras) ? source.cameras.map(normalizeCamera) : [],
-    cameraCuts: Array.isArray(source.cameraCuts) ? source.cameraCuts as CameraCut[] : [],
-    activeCameraId: typeof source.activeCameraId === "string" ? source.activeCameraId : null,
+    name: source.name === undefined ? defaults.name : projectText(source.name, "name"),
+    fps: source.fps === undefined ? defaults.fps : projectNumber(source.fps, "fps", 1, 120),
+    duration: source.duration === undefined ? defaults.duration : projectNumber(source.duration, "duration", 0.01, 3600),
+    currentTime: source.currentTime === undefined ? defaults.currentTime : projectNumber(source.currentTime, "currentTime", 0, 3600),
+    isPlaying: source.isPlaying === undefined ? defaults.isPlaying : projectBoolean(source.isPlaying, "isPlaying"),
+    safeFrameRatio: normalizeSafeFrame(source.safeFrameRatio),
+    cubes,
+    actors,
+    cameras,
+    cameraCuts,
+    activeCameraId: source.activeCameraId == null ? null : projectText(source.activeCameraId, "activeCameraId"),
   };
 }
 
 export function normalizeCamera(value: unknown): Camera {
-  const camera = isRecord(value) ? value : {};
-  const pathPoints = Array.isArray(camera.pathPoints) ? camera.pathPoints as PathPoint[] : [];
+  return normalizeCameraAt(value, "camera");
+}
+
+function normalizeCameraAt(value: unknown, path: string): Camera {
+  const camera = projectRecord(value, path, [
+    "id", "name", "position", "rotation", "fov", "duration", "pathPoints",
+    "movementMode", "aimMode", "trackingActorId", "trackingPoint", "followOffset",
+    "followSpeed", "motionPreset",
+  ]);
+  const pathPoints = normalizePathPoints(camera.pathPoints, `${path}.pathPoints`);
   const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
+  const position = projectVec3(camera.position, `${path}.position`);
+  const movementMode = camera.movementMode === undefined
+    ? "static"
+    : projectChoice(camera.movementMode, `${path}.movementMode`, ["static", "path", "follow"] as const);
+  const aimMode = camera.aimMode === undefined
+    ? "manual"
+    : projectChoice(camera.aimMode, `${path}.aimMode`, ["manual", "actor"] as const);
+  const trackingPoint = camera.trackingPoint === undefined
+    ? "chest"
+    : projectChoice(camera.trackingPoint, `${path}.trackingPoint`, ["head", "chest", "center"] as const);
+  const motionPreset = camera.motionPreset == null
+    ? null
+    : projectChoice(camera.motionPreset, `${path}.motionPreset`, CAMERA_MOTION_PRESETS);
   return {
-    id: String(camera.id ?? `camera_${randomUUID()}`),
-    name: String(camera.name ?? "Camera"),
-    position: zeroPoint ? [...zeroPoint.position] : vec3Or(camera.position, [0, 1.6, 3]),
-    rotation: vec3Or(camera.rotation, [0, 180, 0]),
-    fov: finiteOr(camera.fov, 35),
-    duration: finiteOr(camera.duration, 3),
+    id: projectText(camera.id, `${path}.id`),
+    name: projectText(camera.name, `${path}.name`),
+    position: zeroPoint ? [...zeroPoint.position] : position,
+    rotation: projectVec3(camera.rotation, `${path}.rotation`, 36000),
+    fov: projectNumber(camera.fov, `${path}.fov`, 1, 179),
+    duration: projectNumber(camera.duration, `${path}.duration`, 0.01, 3600),
     pathPoints,
-    movementMode: camera.movementMode === "path" || camera.movementMode === "follow" ? camera.movementMode : "static",
-    aimMode: camera.aimMode === "actor" ? "actor" : "manual",
-    trackingActorId: typeof camera.trackingActorId === "string" ? camera.trackingActorId : null,
-    trackingPoint: camera.trackingPoint === "head" || camera.trackingPoint === "center" ? camera.trackingPoint : "chest",
-    followOffset: vec3Or(camera.followOffset, [0, 1.6, 3]),
-    followSpeed: finiteOr(camera.followSpeed, 6),
-    motionPreset: isMotionPreset(camera.motionPreset) ? camera.motionPreset : null,
+    movementMode,
+    aimMode,
+    trackingActorId: camera.trackingActorId == null ? null : projectText(camera.trackingActorId, `${path}.trackingActorId`),
+    trackingPoint,
+    followOffset: camera.followOffset === undefined
+      ? [0, 1.6, 3]
+      : projectVec3(camera.followOffset, `${path}.followOffset`),
+    followSpeed: camera.followSpeed === undefined
+      ? 6
+      : projectNumber(camera.followSpeed, `${path}.followSpeed`, 0.01, 100),
+    motionPreset,
   };
 }
 
@@ -267,10 +319,7 @@ export function cameraOffsetInActorSpace(camera: Camera, actor: Actor): Vec3 {
 }
 
 export function isMotionPreset(value: unknown): value is CameraMotionPreset {
-  return [
-    "push_in", "pull_out", "truck_left", "truck_right", "fixed_tracking",
-    "lead_follow", "chase_follow", "orbit_left", "orbit_right",
-  ].includes(String(value));
+  return typeof value === "string" && (CAMERA_MOTION_PRESETS as readonly string[]).includes(value);
 }
 
 export function clone<T>(value: T): T {
@@ -334,25 +383,167 @@ function worldOffsetToActorLocal(offset: Vec3, yawDegrees: number): Vec3 {
   ];
 }
 
-function vec3Or(value: unknown, fallback: Vec3): Vec3 {
-  if (!Array.isArray(value) || value.length !== 3) return [...fallback];
-  const parsed = value.map(Number);
-  return parsed.every(Number.isFinite) ? parsed as Vec3 : [...fallback];
-}
-
-function normalizePathOwner<T extends { position: Vec3; pathPoints: PathPoint[] }>(owner: T): T {
-  const pathPoints = Array.isArray(owner.pathPoints) ? owner.pathPoints : [];
+function normalizeActor(value: unknown, path: string): Actor {
+  const actor = projectRecord(value, path, ["id", "name", "position", "rotation", "height", "pathPoints"]);
+  const pathPoints = normalizePathPoints(actor.pathPoints, `${path}.pathPoints`);
   const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
+  const position = projectVec3(actor.position, `${path}.position`);
   return {
-    ...owner,
-    position: zeroPoint ? [...zeroPoint.position] : owner.position,
+    id: projectText(actor.id, `${path}.id`),
+    name: projectText(actor.name, `${path}.name`),
+    position: zeroPoint ? [...zeroPoint.position] : position,
+    rotation: projectVec3(actor.rotation, `${path}.rotation`, 36000),
+    height: projectNumber(actor.height, `${path}.height`, 0.1, 20),
     pathPoints,
   };
 }
 
-function finiteOr(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+function normalizeProp(value: unknown, path: string): Prop {
+  const prop = projectRecord(value, path, [
+    "id", "name", "position", "rotation", "scale", "visible", "locked",
+    "propPreset", "stepCount", "pathPoints",
+  ]);
+  const pathPoints = normalizePathPoints(prop.pathPoints, `${path}.pathPoints`);
+  const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
+  const position = projectVec3(prop.position, `${path}.position`);
+  const propPreset = prop.propPreset == null
+    ? undefined
+    : projectChoice(prop.propPreset, `${path}.propPreset`, PROP_PRESETS);
+  const stepCount = prop.stepCount == null
+    ? undefined
+    : projectInteger(prop.stepCount, `${path}.stepCount`, 2, 64);
+  return {
+    id: projectText(prop.id, `${path}.id`),
+    name: projectText(prop.name, `${path}.name`),
+    position: zeroPoint ? [...zeroPoint.position] : position,
+    rotation: projectVec3(prop.rotation, `${path}.rotation`, 36000),
+    scale: projectVec3(prop.scale, `${path}.scale`, 1_000_000, 0.001),
+    visible: prop.visible === undefined ? true : projectBoolean(prop.visible, `${path}.visible`),
+    locked: prop.locked === undefined ? false : projectBoolean(prop.locked, `${path}.locked`),
+    ...(propPreset !== undefined ? { propPreset } : {}),
+    ...(stepCount !== undefined ? { stepCount } : {}),
+    pathPoints,
+  };
+}
+
+function normalizeCameraCut(value: unknown, path: string): CameraCut {
+  const cut = projectRecord(value, path, ["id", "time", "cameraId", "anchor"]);
+  const anchorValue = cut.anchor;
+  let anchor: CameraCut["anchor"];
+  if (anchorValue != null) {
+    const source = projectRecord(anchorValue, `${path}.anchor`, ["kind", "actorId", "pointId"]);
+    const kind = projectChoice(source.kind, `${path}.anchor.kind`, ["actor_path_point"] as const);
+    anchor = {
+      kind,
+      actorId: projectText(source.actorId, `${path}.anchor.actorId`),
+      pointId: projectText(source.pointId, `${path}.anchor.pointId`),
+    };
+  }
+  return {
+    id: projectText(cut.id, `${path}.id`),
+    time: projectNumber(cut.time, `${path}.time`, 0, 3600),
+    cameraId: projectText(cut.cameraId, `${path}.cameraId`),
+    ...(anchor ? { anchor } : {}),
+  };
+}
+
+function normalizePathPoints(value: unknown, path: string): PathPoint[] {
+  return normalizeCollection(value, path, 2000, (item, itemPath) => {
+    const point = projectRecord(item, itemPath, ["id", "time", "position", "yaw"]);
+    return {
+      id: projectText(point.id, `${itemPath}.id`),
+      time: projectNumber(point.time, `${itemPath}.time`, 0, 3600),
+      position: projectVec3(point.position, `${itemPath}.position`),
+      ...(point.yaw == null
+        ? {}
+        : { yaw: projectNumber(point.yaw, `${itemPath}.yaw`, -36000, 36000) }),
+    };
+  });
+}
+
+function normalizeCollection<T>(
+  value: unknown,
+  path: string,
+  maximum: number,
+  normalizer: (item: unknown, path: string) => T,
+): T[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) invalidProject(path, "must be an array");
+  if (value.length > maximum) invalidProject(path, `must contain at most ${maximum} items`);
+  return value.map((item, index) => normalizer(item, `${path}[${index}]`));
+}
+
+function ensureUniqueProjectIds(items: Array<{ id: string; pathPoints?: PathPoint[] }>, path: string): void {
+  const ids = new Set<string>();
+  for (const [index, item] of items.entries()) {
+    if (ids.has(item.id)) invalidProject(path, `contains duplicate id ${item.id}`);
+    ids.add(item.id);
+    if (item.pathPoints) ensureUniqueProjectIds(item.pathPoints, `${path}[${index}].pathPoints`);
+  }
+}
+
+function projectRecord(value: unknown, path: string, allowed?: readonly string[]): Record<string, unknown> {
+  if (!isRecord(value)) invalidProject(path, "must be an object");
+  if (allowed) {
+    const allowedFields = new Set(allowed);
+    const unsupported = Object.keys(value).find((key) => !allowedFields.has(key));
+    if (unsupported) invalidProject(`${path}.${unsupported}`, "is not supported");
+  }
+  return value;
+}
+
+function projectText(value: unknown, path: string): string {
+  if (typeof value !== "string" || !value.trim()) invalidProject(path, "must be a non-empty string");
+  return value.trim();
+}
+
+function projectNumber(value: unknown, path: string, minimum: number, maximum: number): number {
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(value)
+      : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+    invalidProject(path, `must be a number between ${minimum} and ${maximum}`);
+  }
+  return parsed;
+}
+
+function projectInteger(value: unknown, path: string, minimum: number, maximum: number): number {
+  const parsed = projectNumber(value, path, minimum, maximum);
+  if (!Number.isInteger(parsed)) invalidProject(path, `must be an integer between ${minimum} and ${maximum}`);
+  return parsed;
+}
+
+function projectBoolean(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean") invalidProject(path, "must be a boolean");
+  return value;
+}
+
+function projectVec3(value: unknown, path: string, limit = 1_000_000, minimum?: number): Vec3 {
+  if (!Array.isArray(value) || value.length !== 3) invalidProject(path, "must be a three-number array");
+  return value.map((item, index) => projectNumber(
+    item,
+    `${path}[${index}]`,
+    minimum ?? -limit,
+    limit,
+  )) as Vec3;
+}
+
+function projectChoice<const T extends readonly string[]>(value: unknown, path: string, choices: T): T[number] {
+  if (typeof value !== "string" || !(choices as readonly string[]).includes(value)) {
+    invalidProject(path, `must be one of ${choices.join(", ")}`);
+  }
+  return value as T[number];
+}
+
+function normalizeSafeFrame(value: unknown): SafeFrameRatio {
+  if (value === undefined) return "off";
+  return projectChoice(value, "safeFrameRatio", ["off", "9:16", "16:9", "1:1"] as const);
+}
+
+function invalidProject(path: string, message: string): never {
+  throw new Error(`Invalid V-camera project data: ${path} ${message}`);
 }
 
 function round(value: number): number {

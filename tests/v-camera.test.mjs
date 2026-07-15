@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import {
   createMotionPresetPatch,
@@ -9,6 +11,8 @@ import {
   resolveByIdOrName,
 } from "../dist/v-camera/project.js";
 import { handleVCameraCommand } from "../dist/commands/v-camera.js";
+
+const execFileAsync = promisify(execFile);
 
 const actor = {
   id: "actor-1",
@@ -61,6 +65,20 @@ test("zero-time path points become the canonical entity position", () => {
   });
   assert.deepEqual(project.actors[0].position, [1, 2, 3]);
   assert.deepEqual(project.cameras[0].position, [4, 5, 6]);
+});
+
+test("remote project validation rejects malformed path points with a stable error", () => {
+  assert.throws(() => normalizeProject({
+    ...defaultVCameraProject(),
+    actors: [{ ...actor, pathPoints: [null] }],
+  }), /Invalid V-camera project data: actors\[0\]\.pathPoints\[0\] must be an object/);
+});
+
+test("remote project validation rejects unknown entity fields before they can be written", () => {
+  assert.throws(() => normalizeProject({
+    ...defaultVCameraProject(),
+    actors: [{ ...actor, unsupportedField: "must-not-survive" }],
+  }), /Invalid V-camera project data: actors\[0\]\.unsupportedField is not supported/);
 });
 
 test("path JSON accepts millisecond precision and sorts by time", () => {
@@ -179,6 +197,62 @@ test("dry-run computes a camera preset without issuing a write", async () => {
     console.log = originalLog;
   }
   assert.equal(postCount, 0);
+});
+
+test("V-camera create dry-run never contacts the API even when --yes is present", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [
+    "dist/cli.js", "canvas", "v-camera", "create",
+    "--canvas-id", "canvas-1", "--x", "0", "--y", "0",
+    "--yes", "--dry-run", "--json",
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      MIRAIVFX_API_BASE: "http://127.0.0.1:1",
+      MIRAIVFX_TOKEN: "dry-run-test-token",
+    },
+  });
+  const payload = JSON.parse(stdout);
+  assert.equal(payload.dry_run, true);
+  assert.equal(payload.canvas_id, "canvas-1");
+  assert.equal(payload.ops[0].type, "add_node");
+  assert.equal(payload.ops[0].node.type, "v-camera");
+});
+
+test("V-camera help exits before canvas validation", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [
+    "dist/cli.js", "canvas", "v-camera", "--help",
+  ], {
+    cwd: process.cwd(),
+    env: { ...process.env, MIRAIVFX_TOKEN: "help-test-token" },
+  });
+  assert.match(stdout, /Usage: mir-cli canvas v-camera/);
+});
+
+test("stair step counts must be integers for both add and set", async () => {
+  const stairs = {
+    id: "stairs-1",
+    name: "Stairs",
+    position: [0, 0.375, 0],
+    rotation: [0, 0, 0],
+    scale: [1.6, 0.75, 1.4],
+    visible: true,
+    locked: false,
+    propPreset: "stairs",
+    stepCount: 6,
+    pathPoints: [],
+  };
+  const project = { ...defaultVCameraProject(), cubes: [stairs] };
+  const api = mutationApi(project, []);
+
+  await assert.rejects(() => handleVCameraCommand(api, "https://miraivfx.art", [
+    "prop", "add", "--canvas-id", "canvas-1", "--preset", "stairs",
+    "--steps", "2.5", "--dry-run",
+  ], false), /--steps must be an integer between 2 and 64/);
+  await assert.rejects(() => handleVCameraCommand(api, "https://miraivfx.art", [
+    "prop", "set", "--canvas-id", "canvas-1", "--prop", stairs.id,
+    "--steps", "2.5", "--dry-run",
+  ], false), /--steps must be an integer between 2 and 64/);
 });
 
 test("actor path edits keep anchored cuts aligned and synchronize the origin", async () => {

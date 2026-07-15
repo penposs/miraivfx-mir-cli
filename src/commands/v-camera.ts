@@ -67,6 +67,10 @@ export async function handleVCameraCommand(
   asJson: boolean,
 ): Promise<void> {
   const [subject = "", rawAction = "", ...tail] = args;
+  if ([subject, rawAction].some((value) => value === "--help" || value === "-h" || value === "help")) {
+    text(vCameraUsage());
+    return;
+  }
   if (subject === "inspect") {
     await inspectVCamera(api, args.slice(1), asJson);
     return;
@@ -238,7 +242,7 @@ function mutateProp(project: VCameraProject, action: string, args: string[]) {
       visible: true,
       locked: false,
       propPreset: preset,
-      ...(preset === "stairs" ? { stepCount: optionalNumber(args, "--steps", 2, 64) ?? 6 } : {}),
+      ...(preset === "stairs" ? { stepCount: optionalInteger(args, "--steps", 2, 64) ?? 6 } : {}),
       pathPoints: [],
     };
     return { patch: { cubes: [...props, prop] }, operation: "prop.add", entityId: id };
@@ -254,7 +258,7 @@ function mutateProp(project: VCameraProject, action: string, args: string[]) {
     const scale = parseVec3(getFlagValue(args, "--scale"), "--scale");
     const visible = optionalBoolean(args, "--visible");
     const locked = optionalBoolean(args, "--locked");
-    const steps = optionalNumber(args, "--steps", 2, 64);
+    const steps = optionalInteger(args, "--steps", 2, 64);
     if ([name, position, rotation, scale, visible, locked, steps].every((value) => value === undefined)) {
       throw new Error("No prop fields provided");
     }
@@ -266,7 +270,7 @@ function mutateProp(project: VCameraProject, action: string, args: string[]) {
       ...(scale ? { scale } : {}),
       ...(visible !== undefined ? { visible } : {}),
       ...(locked !== undefined ? { locked } : {}),
-      ...(steps !== undefined ? { stepCount: Math.round(steps) } : {}),
+      ...(steps !== undefined ? { stepCount: steps } : {}),
     };
     return { patch: { cubes: props }, operation: "prop.set", entityId: prop.id };
   }
@@ -579,6 +583,14 @@ function optionalNumber(args: string[], flag: string, minimum: number, maximum: 
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
     throw new Error(`${flag} must be between ${minimum} and ${maximum}`);
+  }
+  return parsed;
+}
+
+function optionalInteger(args: string[], flag: string, minimum: number, maximum: number): number | undefined {
+  const parsed = optionalNumber(args, flag, minimum, maximum);
+  if (parsed !== undefined && !Number.isInteger(parsed)) {
+    throw new Error(`${flag} must be an integer between ${minimum} and ${maximum}`);
   }
   return parsed;
 }
