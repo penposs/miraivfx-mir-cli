@@ -17,6 +17,7 @@ Use `mir-cli` when you want to:
 - read the currently available models and parameters
 - create a new project or a new canvas
 - keep complex creative work laid out clearly
+- parameterize Virtual Shoot actors, props, camera paths, tracking shots, motion presets, and camera cuts
 
 ## Install
 
@@ -202,6 +203,39 @@ Delete a node:
 mir-cli canvas node delete --canvas-id <canvas_id> --node-id <node_id> --yes --json
 ```
 
+## Control Virtual Shoot
+
+Create or inspect a Virtual Shoot node:
+
+```powershell
+mir-cli canvas v-camera create --canvas-id <canvas_id> --yes --json
+mir-cli canvas v-camera inspect --canvas-id <canvas_id> --json
+```
+
+Add an actor and give it a timed 3D path. Positions use `x,y,z`, and path times accept millisecond precision:
+
+```powershell
+mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "Hero" --position "0,0,0" --yes --json
+mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "Hero" --time 2.125 --position "2,0,4" --yaw 45 --yes --json
+```
+
+Add a camera, bind it to an actor, or apply a production-ready motion preset:
+
+```powershell
+mir-cli canvas v-camera camera add --canvas-id <canvas_id> --name "Camera A" --position "0,1.6,6" --yes --json
+mir-cli canvas v-camera camera follow --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --tracking-point chest --offset "0,1.6,3" --speed 6 --yes --json
+mir-cli canvas v-camera camera preset --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --preset orbit_left --duration 8 --yes --json
+```
+
+Schedule a camera cut by time, or anchor it to an actor path point:
+
+```powershell
+mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera A" --time 4.5 --yes --json
+mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera B" --actor "Hero" --point <path_point_id> --yes --json
+```
+
+Anchored cuts inherit the actor path point time automatically. Every mutation supports `--dry-run`. The server rejects stale revisions, so simultaneous web edits cannot be silently overwritten. Virtual Shoot CLI commands do not edit recordings, takes, uploaded media, or generated results.
+
 ## Use It With An AI Assistant
 
 You can ask your AI assistant something like:
@@ -225,6 +259,7 @@ Clone shot 3 as a new version, keep the same references, and change the prompt t
 - You sign in through the browser.
 - Canvas-changing commands require explicit flags such as `--yes` or `--allow-upload`.
 - The CLI edits your canvas with focused node operations.
+- Virtual Shoot edits use a dedicated revision-protected API and preserve recording data.
 - Generation submission stays in the Miraivfx web app.
 - Result downloads are limited to completed final media from one explicit canvas.
 - You should never give an AI assistant your password or raw tokens.

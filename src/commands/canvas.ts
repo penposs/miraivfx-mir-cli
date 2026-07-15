@@ -8,6 +8,7 @@ import { ApiClient } from "../api/client.js";
 import { loadRuntimeConfig } from "../core/config.js";
 import { openUrl } from "../core/open.js";
 import { json, text } from "../core/output.js";
+import { handleVCameraCommand, vCameraUsage } from "./v-camera.js";
 
 export async function handleCanvasCommand(subcommand = "", args: string[]): Promise<void> {
   const asJson = hasFlag(args, "--json");
@@ -147,6 +148,22 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
     return;
   }
 
+  if (subcommand === "v-camera") {
+    const action = args[0] ?? "";
+    if (action === "create") {
+      const result = await addGenericNode(api, ["--type", "v-camera", ...args.slice(1)], config.appBase);
+      if (result.opened && typeof result.url === "string") await openUrl(result.url);
+      asJson ? json(result) : text(`Added V-camera node ${result.node_id} to ${result.canvas_id}`);
+      return;
+    }
+    if (!action) {
+      text(vCameraUsage());
+      return;
+    }
+    await handleVCameraCommand(api, config.appBase, args, asJson);
+    return;
+  }
+
   if (subcommand === "node") {
     const action = args[0] ?? "";
     const rest = args.slice(1);
@@ -208,7 +225,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
       asJson ? json(result) : text(`Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
-    text("Usage: mir-cli canvas node <add|update|clone|delete|connect|disconnect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-vibex|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d>");
+    text("Usage: mir-cli canvas node <add|update|clone|delete|connect|disconnect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-vibex|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d|add-v-camera>");
     return;
   }
 
@@ -218,7 +235,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
     return;
   }
 
-  text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|node>");
+  text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|node|v-camera>");
 }
 
 const CANVAS_NODE_TYPES = new Set([
@@ -249,6 +266,7 @@ const CANVAS_NODE_TYPES = new Set([
   "panorama-split",
   "panorama-gen",
   "blocking-3d",
+  "v-camera",
   "audio",
   "file",
   "resize",
@@ -277,6 +295,7 @@ const NODE_ACTION_ALIASES: Record<string, string> = {
   "add-pro-camera": "pro-camera",
   "add-panorama-gen": "panorama-gen",
   "add-blocking-3d": "blocking-3d",
+  "add-v-camera": "v-camera",
   "add-drawing-board": "drawing-board",
   "add-frame-extractor": "frame-extractor",
   "add-upscale": "upscale",
@@ -560,6 +579,13 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
   const settings = parseSettings(getFlagValue(args, "--settings-json"));
   const connectTo = getFlagValue(args, "--connect-to");
 
+  if (
+    nodeType === "v-camera"
+    && (Object.keys(dataJson).length > 0 || settings || model || content || rawTitle)
+  ) {
+    throw new Error("Create the Virtual Shoot node first, then use 'mir-cli canvas v-camera' commands to configure it");
+  }
+
   if (model) {
     const modelTask = modelTaskForNode(nodeType);
     if (modelTask) await assertModelAvailable(api, modelTask, model);
@@ -579,7 +605,7 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
     type: nodeType,
     content,
     title,
-    data: {
+    data: nodeType === "v-camera" ? {} : {
       ...defaultDataForNode(nodeType),
       ...nodeData,
       ...(settings ? { settings } : {}),
@@ -795,6 +821,12 @@ async function updateCanvasNode(api: ApiClient, args: string[], appBase: string)
   const model = getFlagValue(args, "--model");
 
   const nodeType = String((node as any).type || "");
+  if (
+    nodeType === "v-camera"
+    && (dataJson || settings || model || content !== undefined || rawTitle !== undefined)
+  ) {
+    throw new Error("Use 'mir-cli canvas v-camera' commands to update Virtual Shoot data");
+  }
   const title = getFlagValue(args, "--node-title");
   if (title !== undefined) patch.title = title;
   if (content !== undefined) patch.content = content;
@@ -1256,6 +1288,7 @@ function defaultShapeForNode(type: string): { width: number; height: number } {
   if (type === "panorama-split") return { width: 360, height: 420 };
   if (type === "panorama-gen") return { width: 360, height: 320 };
   if (type === "blocking-3d") return { width: 640, height: 520 };
+  if (type === "v-camera") return { width: 860, height: 640 };
   if (type === "runninghub" || type === "seedance2-runninghub" || type === "sora2-runninghub") return { width: 340, height: 520 };
   if (type === "vibex-webapp") return { width: 860, height: 640 };
   if (type === "seedance-volc" || type === "seedance2-rh-standard") return { width: 420, height: 580 };
@@ -1287,6 +1320,7 @@ function defaultTitleForNode(type: string): string | undefined {
     "panorama-gen": "全景图生成",
     "panorama-split": "全景预览",
     "blocking-3d": "站位图",
+    "v-camera": "虚拟实拍",
     "drawing-board": "画板",
     "frame-extractor": "抽帧",
     upscale: "超分",
@@ -1344,6 +1378,9 @@ function defaultDataForNode(type: string): Record<string, unknown> {
   }
   if (type === "blocking-3d") {
     return { blockingAspect: "16:9" };
+  }
+  if (type === "v-camera") {
+    return {};
   }
   if (type === "drawing-board") {
     return { boardElements: [], boardWidth: 1024, boardHeight: 1024 };

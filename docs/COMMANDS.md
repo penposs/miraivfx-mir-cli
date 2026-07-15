@@ -84,6 +84,75 @@ Common direct field mappings:
 
 Common aliases include `add-text`, `add-video`, `add-audio`, `add-video-reference`, `add-agent`, `add-suno`, `add-seedance`, `add-seedance-volc`, `add-seedance-rh`, `add-vibex`, `add-runninghub`, `add-pro-camera`, `add-panorama-gen`, `add-blocking-3d`, `add-drawing-board`, `add-frame-extractor`, `add-upscale`, `add-resize`, `add-smart-split`, `add-panorama-split`, and `add-relay`.
 
+## Virtual Shoot
+
+Create and inspect:
+
+```powershell
+mir-cli canvas v-camera create --canvas-id <canvas_id> --yes --json
+mir-cli canvas v-camera inspect --canvas-id <canvas_id> --json
+mir-cli canvas v-camera inspect --canvas-id <canvas_id> --node-id <node_id> --json
+mir-cli canvas node add-v-camera --canvas-id <canvas_id> --yes --json
+```
+
+When a canvas contains more than one Virtual Shoot node, pass `--node-id` on every inspect or mutation command.
+
+Project settings:
+
+```powershell
+mir-cli canvas v-camera project set --canvas-id <canvas_id> --name "Stage A" --fps 24 --duration 30 --safe-frame 16:9 --yes --json
+```
+
+Actors:
+
+```powershell
+mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "Hero" --position "0,0,0" --rotation "0,0,0" --height 1.75 --yes --json
+mir-cli canvas v-camera actor set --canvas-id <canvas_id> --actor "Hero" --position "2,0,4" --rotation "0,45,0" --yes --json
+mir-cli canvas v-camera actor delete --canvas-id <canvas_id> --actor "Hero" --yes --json
+```
+
+Props:
+
+```powershell
+mir-cli canvas v-camera prop add --canvas-id <canvas_id> --preset thin_wall --name "Back wall" --position "0,0.85,-3" --scale "4,1.7,0.12" --yes --json
+mir-cli canvas v-camera prop set --canvas-id <canvas_id> --prop "Back wall" --rotation "0,45,0" --visible true --locked false --yes --json
+mir-cli canvas v-camera prop delete --canvas-id <canvas_id> --prop "Back wall" --yes --json
+```
+
+Supported prop presets are `box`, `thin_wall`, `column`, `platform`, `obstacle`, `door_frame`, `stairs`, and `slope`. Stairs accept `--steps 2..64`.
+
+Cameras:
+
+```powershell
+mir-cli canvas v-camera camera add --canvas-id <canvas_id> --name "Camera A" --position "0,1.6,6" --rotation "0,180,0" --fov 35 --duration 8 --yes --json
+mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "Camera A" --position "1,1.8,5" --fov 45 --yes --json
+mir-cli canvas v-camera camera follow --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --tracking-point chest --offset "0,1.6,3" --speed 6 --yes --json
+mir-cli canvas v-camera camera preset --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --preset push_in --duration 6 --yes --json
+mir-cli canvas v-camera camera delete --canvas-id <canvas_id> --camera "Camera A" --yes --json
+```
+
+Motion presets are `push_in`, `pull_out`, `truck_left`, `truck_right`, `fixed_tracking`, `lead_follow`, `chase_follow`, `orbit_left`, and `orbit_right`. Presets generate the same path/follow fields used by the web editor.
+
+Actor, prop, and camera paths share the same commands:
+
+```powershell
+mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "Hero" --time 2.125 --position "2,0,4" --yaw 45 --yes --json
+mir-cli canvas v-camera camera path set --canvas-id <canvas_id> --camera "Camera A" --points-json '[{"time":0,"position":[0,1.6,6]},{"time":5.25,"position":[2,1.6,3]}]' --yes --json
+mir-cli canvas v-camera prop path delete --canvas-id <canvas_id> --prop "Platform 1" --point <point_id> --yes --json
+mir-cli canvas v-camera actor path clear --canvas-id <canvas_id> --actor "Hero" --yes --json
+```
+
+Camera cuts:
+
+```powershell
+mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera A" --time 4.5 --yes --json
+mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera B" --actor "Hero" --point <path_point_id> --yes --json
+mir-cli canvas v-camera cut delete --canvas-id <canvas_id> --cut <cut_id> --yes --json
+mir-cli canvas v-camera cut clear --canvas-id <canvas_id> --yes --json
+```
+
+Anchored cuts derive their time from the selected actor path point. All mutations require `--yes`; use `--dry-run` instead to calculate and print the exact project patch without writing. The dedicated endpoint requires the inspected canvas revision and rejects concurrent web edits. It cannot change takes, recording uploads, media results, task ids, billing fields, or ordinary canvas nodes.
+
 ## Connect And Disconnect
 
 ```powershell

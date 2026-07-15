@@ -27,6 +27,17 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 13. Use `mir-cli canvas node delete --node-id <node_id> --yes` only for exact user-confirmed node ids.
 14. Open the canvas for the user to review and run generation in Miraivfx.
 
+## Virtual Shoot Flow
+
+1. Inspect with `mir-cli canvas v-camera inspect --canvas-id <canvas_id> --json`. If multiple nodes are returned, identify the exact `--node-id` before changing anything.
+2. Prefer named domain commands over generic `node update --data-json`: `project`, `actor`, `prop`, `camera`, and `cut`.
+3. Use `--dry-run` first for multi-entity paths, tracking setups, motion presets, and camera-cut schedules.
+4. Use `position` and `rotation` values in `x,y,z` form. Path times are seconds and may use millisecond precision.
+5. Use actor/prop/camera `path add`, `path set`, `path delete`, and `path clear` for timed movement.
+6. Use `camera follow` for continuous tracking and `camera preset` for push, pull, truck, fixed tracking, lead/chase follow, or orbit shots.
+7. Use `cut add --time` for timeline switching. For actor-path switching, pass both `--actor` and `--point`; the CLI derives the cut time from that point.
+8. Never use generic node data updates to change `vCameraProject`; the dedicated endpoint preserves takes and rejects stale canvas revisions.
+
 ## Direct Field Mapping
 
 - Prefer direct flags over `--data-json` for common generation fields.
@@ -54,4 +65,5 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 - Do not trigger generation, retry tasks, poll task status, or download results from the CLI.
 - Do not control anything outside the user's Miraivfx canvas workflow.
 - Do not write hidden system fields or completed statuses for generation/action nodes.
+- Do not edit Virtual Shoot takes, recording uploads, result nodes, task ids, or billing data. The Virtual Shoot command group is scene-control only.
 - Preserve run directories and execution logs.

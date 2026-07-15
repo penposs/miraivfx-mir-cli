@@ -11,7 +11,7 @@ export class ApiClient {
       headers: this.headers(),
     });
     if (!response.ok) {
-      throw new Error(`Request failed: HTTP ${response.status}`);
+      throw await requestError(response);
     }
     return (await response.json()) as T;
   }
@@ -26,7 +26,7 @@ export class ApiClient {
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      throw new Error(`Request failed: HTTP ${response.status}`);
+      throw await requestError(response);
     }
     return (await response.json()) as T;
   }
@@ -41,7 +41,7 @@ export class ApiClient {
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      throw new Error(`Request failed: HTTP ${response.status}`);
+      throw await requestError(response);
     }
     return (await response.json()) as T;
   }
@@ -53,7 +53,7 @@ export class ApiClient {
       body: form,
     });
     if (!response.ok) {
-      throw new Error(`Request failed: HTTP ${response.status}`);
+      throw await requestError(response);
     }
     return (await response.json()) as T;
   }
@@ -63,7 +63,7 @@ export class ApiClient {
       headers: this.headers(),
     });
     if (!response.ok) {
-      throw new Error(`Request failed: HTTP ${response.status}`);
+      throw await requestError(response);
     }
     return {
       data: new Uint8Array(await response.arrayBuffer()),
@@ -76,4 +76,20 @@ export class ApiClient {
       ? { Authorization: `Bearer ${this.options.token}` }
       : {};
   }
+}
+
+async function requestError(response: Response): Promise<Error> {
+  let detail = "";
+  try {
+    const payload = await response.json() as Record<string, unknown>;
+    const rawDetail = payload.detail ?? payload.error;
+    if (typeof rawDetail === "string") detail = rawDetail;
+    else if (rawDetail && typeof rawDetail === "object") {
+      const object = rawDetail as Record<string, unknown>;
+      detail = String(object.message ?? object.code ?? JSON.stringify(object));
+    }
+  } catch {
+    detail = "";
+  }
+  return new Error(`Request failed: HTTP ${response.status}${detail ? ` - ${detail}` : ""}`);
 }

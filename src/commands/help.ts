@@ -34,6 +34,12 @@ Usage:
   mir-cli canvas node disconnect --canvas-id <canvas_id> --from-node <asset_node_id> --to-node <generation_node_id> --yes --json
   mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "Prompt" --model <model_id> --yes --open --json
   mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <image_url> --connect-to <node_id> --yes --json
+  mir-cli canvas v-camera create --canvas-id <canvas_id> --yes --json
+  mir-cli canvas v-camera inspect --canvas-id <canvas_id> --json
+  mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "Hero" --position "0,0,0" --yes --json
+  mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "Hero" --time 2.125 --position "2,0,4" --yes --json
+  mir-cli canvas v-camera camera preset --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --preset orbit_left --duration 8 --yes --json
+  mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera A" --time 4.5 --yes --json
   mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
 
 Canvas result commands only read completed final media from one explicit canvas. Generation submission remains a manual web action.`);
