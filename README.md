@@ -243,7 +243,7 @@ mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera B" --ac
 
 Anchored cuts inherit the actor path point time automatically. Every mutation supports `--dry-run`. The server rejects stale revisions, so simultaneous web edits cannot be silently overwritten. Virtual Shoot CLI commands do not edit recordings, takes, uploaded media, or generated results.
 
-`camera follow` and `camera aim` are compound helpers and report their effects. Raw `camera set` fields are the stable automation interface. `camera preset` is unavailable; provide exact global-time keyframes through `camera path set` or `camera path update`.
+`camera preset` calls the node's public preset generator and produces ordinary editable global-time keyframes or explicit tracking settings. Raw `camera set` and `camera path add|set|update` remain the unrestricted automation interface. `camera follow` and `camera aim` are compound helpers and report their effects.
 
 ## Use It With An AI Assistant
 

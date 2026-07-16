@@ -102,7 +102,7 @@ When a canvas contains more than one Virtual Shoot node, pass `--node-id` on eve
 
 MIR Virtual Shoot uses one global scene timeline; every path point, shot boundary, and camera cut time is an absolute scene time measured from project second `0`. Entity names may repeat, so automation should retain the stable entity ID returned by each create command and use IDs for later updates.
 
-Raw commands are `project set`, actor/prop/camera `add|set|translate|delete|path`, actor `action`, prop `visibility`, `shot`, and `cut`. Raw `set` commands only change explicitly supplied fields. Expected lifecycle effects such as reference cleanup, active-camera selection, and Shot/Cut synchronization are listed under `rawCommandEffects` and returned by affected dry-runs. `camera follow` and `camera aim` are compound helpers whose effects are declared by capabilities. Raw commands are the stable automation interface.
+Raw commands are `project set`, actor/prop/camera `add|set|translate|delete|path`, actor `action`, prop `visibility`, `shot`, and `cut`. Raw `set` commands only change explicitly supplied fields. Expected lifecycle effects such as reference cleanup, active-camera selection, and Shot/Cut synchronization are listed under `rawCommandEffects` and returned by affected dry-runs. `camera preset` is the node's public convenience generator; its output is ordinary editable camera fields and global-time keyframes. `camera follow` and `camera aim` are compound helpers whose effects are declared by capabilities. Raw commands remain the unrestricted stable automation interface.
 
 The CLI enforces only the server's basic scene contract:
 
@@ -110,6 +110,7 @@ The CLI enforces only the server's basic scene contract:
 - referenced actors, cameras, shots, assets, and path points must exist
 - all timeline values are global seconds from `0` through `3600`
 - path points, shots, and cuts are sorted by global time
+- version 3 rejects duplicate path times within the same entity
 - a follow or actor-aimed camera needs a tracking actor; point aim needs a look-at point
 - asset props need an owned asset ID; main-timeline shots cannot overlap
 - entity IDs are stable and unique; names are editable and may repeat
@@ -157,12 +158,12 @@ Prop fields:
 | `name` | `--name` | editable text |
 | `position` | `--position` | `x,y,z` |
 | `rotation` | `--rotation` | pitch,yaw,roll degrees |
-| `scale` | `--scale` | width,height,depth; each value is `0.001..10000` |
+| `scale` | `--scale` | width,height,depth; each value is `0.05..10000` |
 | `visible` | `--visible` | `true` or `false` |
 | `locked` | `--locked` | `true` or `false` |
 | `propPreset` | `--preset` | `box`, `thin_wall`, `column`, `platform`, `obstacle`, `door_frame`, `stairs`, `slope` |
 | `propPreset` | `--clear-preset` | removes the optional primitive preset |
-| `stepCount` | `--steps` | integer `2..64` |
+| `stepCount` | `--steps` | integer `2..20` |
 | `stepCount` | `--clear-steps` | removes the optional field |
 | `sourceType` | `--source-type` | `primitive` or `asset` |
 | `assetId` | `--asset-id` | owned model asset ID |
@@ -189,7 +190,7 @@ Camera fields:
 | `lookAtPoint` | `--look-at-point` | `x,y,z` |
 | `lookAtPoint` | `--clear-look-at` | stores `null` when the resulting camera remains valid |
 | `followOffset` | `--follow-offset` | local `x,y,z` offset |
-| `followSpeed` | `--follow-speed` | `0.01..100` |
+| `followSpeed` | `--follow-speed` | `1..10` |
 | `motionPreset` | `--motion-preset` | accepted metadata name listed below, or `none` |
 | `motionPreset` | `--clear-motion-preset` | stores `null` |
 
@@ -200,13 +201,13 @@ Path fields are written independently from camera mode and preset metadata. Addi
 | `id` | `--id` or JSON `id` | actor, prop, camera |
 | `time` | `--time` or JSON `time` | actor, prop, camera; global seconds |
 | `position` | `--position` or JSON `position` | actor, prop, camera |
-| `yaw` | `--yaw` or JSON `yaw` | actor, prop, camera |
+| `yaw` | `--yaw` or JSON `yaw` | actor only |
 | `easing` | `--easing` or JSON `easing` | `smooth`, `linear`, `ease_in`, `ease_out`, `ease_in_out` |
-| `rotation` | `--rotation` or JSON `rotation` | camera only |
+| `rotation` | `--rotation` or JSON `rotation` | prop and camera |
 | `fov` | `--fov` or JSON `fov` | camera only |
 | `focusDistance` | `--focus-distance` or JSON `focusDistance` | camera only |
 
-Use `path update --point <id>` with any supported field to update one path point while preserving its ID. Optional fields support `--clear-yaw`, `--clear-easing`, and, for camera points, `--clear-rotation`, `--clear-fov`, and `--clear-focus-distance`.
+Use `path update --point <id>` with any supported field to update one path point while preserving its ID. Actor points support `--clear-yaw`; prop and camera points support `--clear-rotation`; every path supports `--clear-easing`; camera points additionally support `--clear-fov` and `--clear-focus-distance`.
 
 Shot fields:
 
@@ -254,7 +255,7 @@ mir-cli canvas v-camera prop visibility set --canvas-id <canvas_id> --prop "Hero
 mir-cli canvas v-camera prop delete --canvas-id <canvas_id> --prop "Back wall" --yes --json
 ```
 
-Supported prop presets are `box`, `thin_wall`, `column`, `platform`, `obstacle`, `door_frame`, `stairs`, and `slope`. Stairs accept `--steps 2..64` and default to `5`. Supplying `--asset-id` selects `sourceType=asset`, neutral scale `[1,1,1]`, and does not attach a primitive preset unless one is explicitly supplied. Arbitrary external model URLs are not accepted.
+Supported prop presets are `box`, `thin_wall`, `column`, `platform`, `obstacle`, `door_frame`, `stairs`, and `slope`. Stairs accept `--steps 2..20` and default to `5`. Supplying `--asset-id` records a controlled semantic asset reference while Virtual Shoot continues to render proxy geometry. Arbitrary external model URLs are not accepted.
 
 Cameras:
 
@@ -265,26 +266,30 @@ mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "Camera A" -
 mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "Camera A" --aim-mode point --look-at-point "0,1.5,0" --yes --json
 mir-cli canvas v-camera camera aim --canvas-id <canvas_id> --camera "Camera A" --point "0,1.5,0" --yes --json
 mir-cli canvas v-camera camera follow --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --tracking-point chest --offset "0,1.6,3" --speed 6 --yes --json
+mir-cli canvas v-camera camera preset --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --preset push_in --start-time 8 --duration 5 --easing smooth --yes --json
 mir-cli canvas v-camera camera delete --canvas-id <canvas_id> --camera "Camera A" --yes --json
 ```
 
-Accepted `--motion-preset` metadata values are `push_in`, `pull_out`, `truck_left`, `truck_right`, `fixed_tracking`, `lead_follow`, `chase_follow`, `orbit_left`, `orbit_right`, `crane_up`, `crane_down`, `pan_left`, `pan_right`, `tilt_up`, `tilt_down`, `zoom_in`, `zoom_out`, `dolly_zoom_in`, and `dolly_zoom_out`. Use `none` to clear the field. This field is transported to the server exactly as metadata; it does not generate, merge, or alter camera keyframes.
+Accepted `--motion-preset` metadata values are `push_in`, `pull_out`, `truck_left`, `truck_right`, `fixed_tracking`, `lead_follow`, `chase_follow`, `orbit_left`, `orbit_right`, `crane_up`, `crane_down`, `pan_left`, `pan_right`, `tilt_up`, `tilt_down`, `zoom_in`, `zoom_out`, `dolly_zoom_in`, and `dolly_zoom_out`. Use `none` to clear the field. Setting this field alone remains metadata-only.
 
 Movement, timing, framing, and easing are supplied as exact camera fields and keyframes through `camera set` and `camera path set/add`.
 
-`camera follow` requires an explicit `--offset`; `--derive-offset` opts into deriving it from current placement. It clears `motionPreset` only when `--clear-motion-preset` is supplied. `camera aim` changes only the fields declared for its selected mode. Both are compound helpers. `camera preset` is unavailable; use `camera set` plus `camera path set`.
+`camera preset` recognizes the node's public presets. `--start-time` defaults to `0`; `--duration` is the movement length, so `--start-time 8 --duration 5` generates an `8 → 13` path. Path presets generate editable keyframes, while `fixed_tracking`, `lead_follow`, and `chase_follow` apply explicit tracking settings without creating fake zero-second points. Use `camera set` plus `camera path add|set|update` for unrestricted custom movement.
+
+`camera follow` requires an explicit `--offset`; `--derive-offset` opts into deriving it from current placement. It clears `motionPreset` only when `--clear-motion-preset` is supplied. `camera aim` changes only the fields declared for its selected mode.
 
 Actor, prop, and camera paths share the same commands:
 
 ```powershell
 mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "Hero" --time 2.125 --position "2,0,4" --yaw 45 --yes --json
+mir-cli canvas v-camera prop path add --canvas-id <canvas_id> --prop "Platform 1" --time 6 --position "2,0.5,3" --rotation "0,45,0" --easing smooth --yes --json
 mir-cli canvas v-camera camera path set --canvas-id <canvas_id> --camera "Camera A" --points-json '[{"time":8,"position":[0,1.6,6],"fov":35},{"time":13,"position":[2,1.6,3],"rotation":[0,12,0],"fov":52,"focusDistance":6,"easing":"ease_out"}]' --yes --json
 mir-cli canvas v-camera camera path update --canvas-id <canvas_id> --camera "Camera A" --point <point_id> --time 13.125 --fov 48 --clear-focus-distance --yes --json
 mir-cli canvas v-camera prop path delete --canvas-id <canvas_id> --prop "Platform 1" --point <point_id> --yes --json
 mir-cli canvas v-camera actor path clear --canvas-id <canvas_id> --actor "Hero" --yes --json
 ```
 
-`path set --points-json` always accepts absolute scene times. It never converts global times to camera-local or shot-local times.
+`path set --points-json` always accepts absolute scene times. It never converts global times to camera-local or shot-local times. Version 3 rejects duplicate times within one entity path.
 
 Shots:
 

@@ -18,19 +18,28 @@ export type CameraMotionPreset = typeof CAMERA_MOTION_PRESETS[number];
 export const PROP_PRESETS = VCAMERA_ENUMS.propPreset;
 export type PropPreset = typeof PROP_PRESETS[number];
 
-export interface PathPoint {
+export interface ScenePathPoint {
   id: string;
   time: number;
   position: Vec3;
-  yaw?: number;
   easing?: SceneEasing;
 }
 
-export interface CameraPathPoint extends PathPoint {
+export interface ActorPathPoint extends ScenePathPoint {
+  yaw?: number;
+}
+
+export interface PropPathPoint extends ScenePathPoint {
+  rotation?: Vec3;
+}
+
+export interface CameraPathPoint extends ScenePathPoint {
   rotation?: Vec3;
   fov?: number;
   focusDistance?: number;
 }
+
+export type PathPoint = ActorPathPoint;
 
 export interface Actor {
   id: string;
@@ -47,7 +56,7 @@ export interface Actor {
     targetActorId?: string;
     targetPoint?: Vec3;
   }>;
-  pathPoints: PathPoint[];
+  pathPoints: ActorPathPoint[];
 }
 
 export interface Prop {
@@ -63,7 +72,7 @@ export interface Prop {
   sourceType?: "primitive" | "asset";
   assetId?: string;
   visibilityKeyframes?: Array<{ id: string; time: number; visible: boolean }>;
-  pathPoints: PathPoint[];
+  pathPoints: PropPathPoint[];
 }
 
 export interface Camera {
@@ -108,7 +117,7 @@ export interface CameraShot {
 }
 
 export interface VCameraProject extends Record<string, unknown> {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   name: string;
   fps: number;
   duration: number;
@@ -124,19 +133,19 @@ export interface VCameraProject extends Record<string, unknown> {
 }
 
 export const PROP_DEFAULTS: Record<PropPreset, { name: string; scale: Vec3 }> = {
-  box: { name: "Cube", scale: [1, 1, 1] },
-  thin_wall: { name: "Thin wall", scale: [2.8, 1.7, 0.12] },
-  column: { name: "Column", scale: [0.35, 2.2, 0.35] },
-  platform: { name: "Platform", scale: [2.2, 0.18, 1.5] },
-  obstacle: { name: "Obstacle", scale: [1.1, 0.75, 0.7] },
-  door_frame: { name: "Door frame", scale: [1.8, 2.25, 0.16] },
-  stairs: { name: "Stairs", scale: [1.6, 0.75, 1.4] },
-  slope: { name: "Slope", scale: [1.7, 0.65, 1.35] },
+  box: { name: VCAMERA_DEFAULTS.propPresets.box.name, scale: [...VCAMERA_DEFAULTS.propPresets.box.scale] },
+  thin_wall: { name: VCAMERA_DEFAULTS.propPresets.thin_wall.name, scale: [...VCAMERA_DEFAULTS.propPresets.thin_wall.scale] },
+  column: { name: VCAMERA_DEFAULTS.propPresets.column.name, scale: [...VCAMERA_DEFAULTS.propPresets.column.scale] },
+  platform: { name: VCAMERA_DEFAULTS.propPresets.platform.name, scale: [...VCAMERA_DEFAULTS.propPresets.platform.scale] },
+  obstacle: { name: VCAMERA_DEFAULTS.propPresets.obstacle.name, scale: [...VCAMERA_DEFAULTS.propPresets.obstacle.scale] },
+  door_frame: { name: VCAMERA_DEFAULTS.propPresets.door_frame.name, scale: [...VCAMERA_DEFAULTS.propPresets.door_frame.scale] },
+  stairs: { name: VCAMERA_DEFAULTS.propPresets.stairs.name, scale: [...VCAMERA_DEFAULTS.propPresets.stairs.scale] },
+  slope: { name: VCAMERA_DEFAULTS.propPresets.slope.name, scale: [...VCAMERA_DEFAULTS.propPresets.slope.scale] },
 };
 
 export function defaultVCameraProject(): VCameraProject {
   return {
-    version: 2,
+    version: 3,
     name: VCAMERA_DEFAULTS.project.name,
     fps: VCAMERA_DEFAULTS.project.fps,
     duration: VCAMERA_DEFAULTS.project.duration,
@@ -158,9 +167,26 @@ export function defaultVCameraProject(): VCameraProject {
 export function normalizeProject(value: unknown): VCameraProject {
   const defaults = defaultVCameraProject();
   const source = isRecord(value) ? clone(value) : defaults;
-  const cubes = normalizeCollection(source.cubes, "cubes", VCAMERA_LIMITS.collections.props, normalizeProp);
-  const actors = normalizeCollection(source.actors, "actors", VCAMERA_LIMITS.collections.actors, normalizeActor);
-  const cameras = normalizeCollection(source.cameras, "cameras", VCAMERA_LIMITS.collections.cameras, normalizeCameraAt);
+  const sourceVersion = normalizeProjectVersion(source.version);
+  const legacySource = sourceVersion < 3;
+  const cubes = normalizeCollection(
+    source.cubes,
+    "cubes",
+    VCAMERA_LIMITS.collections.props,
+    (item, path) => normalizeProp(item, path, legacySource),
+  );
+  const actors = normalizeCollection(
+    source.actors,
+    "actors",
+    VCAMERA_LIMITS.collections.actors,
+    (item, path) => normalizeActor(item, path, legacySource),
+  );
+  const cameras = normalizeCollection(
+    source.cameras,
+    "cameras",
+    VCAMERA_LIMITS.collections.cameras,
+    (item, path) => normalizeCameraAt(item, path, legacySource),
+  );
   const cameraCuts = normalizeCollection(source.cameraCuts, "cameraCuts", VCAMERA_LIMITS.collections.cameraCuts, normalizeCameraCut);
   const shots = normalizeCollection(source.shots, "shots", VCAMERA_LIMITS.collections.shots, normalizeCameraShot)
     .sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
@@ -172,7 +198,7 @@ export function normalizeProject(value: unknown): VCameraProject {
   const project: VCameraProject = {
     ...defaults,
     ...source,
-    version: 2,
+    version: 3,
     name: source.name === undefined ? defaults.name : projectText(source.name, "name"),
     fps: source.fps === undefined ? defaults.fps : projectNumber(source.fps, "fps", VCAMERA_LIMITS.fps.minimum, VCAMERA_LIMITS.fps.maximum),
     duration: source.duration === undefined ? defaults.duration : projectNumber(source.duration, "duration", VCAMERA_LIMITS.positiveSceneTime.minimum, VCAMERA_LIMITS.positiveSceneTime.maximum),
@@ -193,16 +219,16 @@ export function normalizeProject(value: unknown): VCameraProject {
 }
 
 export function normalizeCamera(value: unknown): Camera {
-  return normalizeCameraAt(value, "camera");
+  return normalizeCameraAt(value, "camera", false);
 }
 
-function normalizeCameraAt(value: unknown, path: string): Camera {
+function normalizeCameraAt(value: unknown, path: string, legacySource: boolean): Camera {
   const camera = projectRecord(value, path, [
     "id", "name", "position", "rotation", "fov", "focusDistance", "duration", "pathPoints",
     "movementMode", "aimMode", "trackingActorId", "trackingPoint", "followOffset",
     "followSpeed", "motionPreset", "lookAtPoint",
   ]);
-  const pathPoints = normalizeCameraPathPoints(camera.pathPoints, `${path}.pathPoints`);
+  const pathPoints = normalizeCameraPathPoints(camera.pathPoints, `${path}.pathPoints`, legacySource);
   const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
   const position = projectVec3(camera.position, `${path}.position`);
   const movementMode = camera.movementMode === undefined
@@ -265,7 +291,7 @@ export function parsePathPoints(value: string | undefined): PathPoint[] {
   if (!value) throw new Error("--points-json is required");
   const parsed = JSON.parse(value) as unknown;
   if (!Array.isArray(parsed)) throw new Error("--points-json must be a JSON array");
-  return parsed.map((item, index) => {
+  const points = parsed.map((item, index) => {
     if (!isRecord(item)) throw new Error(`Path point ${index + 1} must be an object`);
     const position = Array.isArray(item.position)
       ? parseVec3(item.position.join(","), `point ${index + 1} position`)
@@ -290,16 +316,21 @@ export function parsePathPoints(value: string | undefined): PathPoint[] {
       ...(yaw !== undefined ? { yaw } : {}),
       ...(easing !== undefined ? { easing } : {}),
     };
-  }).sort((a, b) => a.time - b.time);
+  }).sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  ensureUniquePathTimes(points, "Path points");
+  return points;
 }
 
 export function parseCameraPathPoints(value: string | undefined): CameraPathPoint[] {
   if (!value) throw new Error("--points-json is required");
   const parsed = JSON.parse(value) as unknown;
   if (!Array.isArray(parsed)) throw new Error("--points-json must be a JSON array");
-  return parsed.map((item, index) => {
+  const points = parsed.map((item, index) => {
     if (!isRecord(item)) throw new Error(`Camera path point ${index + 1} must be an object`);
-    const base = parsePathPoints(JSON.stringify([item]))[0];
+    if (item.yaw !== undefined) {
+      throw new Error(`Camera path point ${index + 1} yaw is not supported; use rotation`);
+    }
+    const base = parseScenePathPoint(item, index, "Camera path point");
     const rotation = item.rotation === undefined
       ? undefined
       : parseVec3(Array.isArray(item.rotation) ? item.rotation.join(",") : String(item.rotation), `point ${index + 1} rotation`);
@@ -311,7 +342,31 @@ export function parseCameraPathPoints(value: string | undefined): CameraPathPoin
       ...(fov !== undefined ? { fov } : {}),
       ...(focusDistance !== undefined ? { focusDistance } : {}),
     };
-  }).sort((a, b) => a.time - b.time);
+  }).sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  ensureUniquePathTimes(points, "Camera path points");
+  return points;
+}
+
+export function parsePropPathPoints(value: string | undefined): PropPathPoint[] {
+  if (!value) throw new Error("--points-json is required");
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed)) throw new Error("--points-json must be a JSON array");
+  const points = parsed.map((item, index) => {
+    if (!isRecord(item)) throw new Error(`Prop path point ${index + 1} must be an object`);
+    if (item.yaw !== undefined) {
+      throw new Error(`Prop path point ${index + 1} yaw is not supported; use rotation`);
+    }
+    const base = parseScenePathPoint(item, index, "Prop path point");
+    const rotation = item.rotation === undefined
+      ? undefined
+      : parseVec3(Array.isArray(item.rotation) ? item.rotation.join(",") : String(item.rotation), `point ${index + 1} rotation`);
+    return {
+      ...base,
+      ...(rotation ? { rotation } : {}),
+    };
+  }).sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  ensureUniquePathTimes(points, "Prop path points");
+  return points;
 }
 
 export function getProjectSceneEnd(project: Pick<VCameraProject, "actors" | "cubes" | "cameras" | "cameraCuts" | "shots">): number {
@@ -359,11 +414,11 @@ function worldOffsetToActorLocal(offset: Vec3, yawDegrees: number): Vec3 {
   ];
 }
 
-function normalizeActor(value: unknown, path: string): Actor {
+function normalizeActor(value: unknown, path: string, legacySource: boolean): Actor {
   const actor = projectRecord(value, path, [
     "id", "name", "position", "rotation", "height", "lookAtActorId", "lookAtPoint", "actionMarkers", "pathPoints",
   ]);
-  const pathPoints = normalizePathPoints(actor.pathPoints, `${path}.pathPoints`);
+  const pathPoints = normalizeActorPathPoints(actor.pathPoints, `${path}.pathPoints`, legacySource);
   const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
   const position = projectVec3(actor.position, `${path}.position`);
   return {
@@ -388,16 +443,16 @@ function normalizeActor(value: unknown, path: string): Actor {
   };
 }
 
-function normalizeProp(value: unknown, path: string): Prop {
+function normalizeProp(value: unknown, path: string, legacySource: boolean): Prop {
   const prop = projectRecord(value, path, [
     "id", "name", "position", "rotation", "scale", "visible", "locked",
     "propPreset", "stepCount", "sourceType", "assetId", "visibilityKeyframes", "pathPoints",
   ]);
-  const pathPoints = normalizePathPoints(prop.pathPoints, `${path}.pathPoints`);
+  const pathPoints = normalizePropPathPoints(prop.pathPoints, `${path}.pathPoints`, legacySource);
   const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
   const position = projectVec3(prop.position, `${path}.position`);
   const propPreset = prop.propPreset == null
-    ? undefined
+    ? "box"
     : projectChoice(prop.propPreset, `${path}.propPreset`, PROP_PRESETS);
   const stepCount = prop.stepCount == null
     ? undefined
@@ -410,7 +465,7 @@ function normalizeProp(value: unknown, path: string): Prop {
     scale: projectVec3(prop.scale, `${path}.scale`, VCAMERA_LIMITS.scale.maximum, VCAMERA_LIMITS.scale.minimum),
     visible: prop.visible === undefined ? true : projectBoolean(prop.visible, `${path}.visible`),
     locked: prop.locked === undefined ? false : projectBoolean(prop.locked, `${path}.locked`),
-    ...(propPreset !== undefined ? { propPreset } : {}),
+    propPreset,
     ...(stepCount !== undefined ? { stepCount } : {}),
     sourceType: prop.sourceType === undefined
       ? "primitive"
@@ -467,8 +522,8 @@ function normalizeCameraShot(value: unknown, path: string): CameraShot {
   };
 }
 
-function normalizePathPoints(value: unknown, path: string): PathPoint[] {
-  return normalizeCollection(value, path, VCAMERA_LIMITS.collections.pathPointsPerEntity, (item, itemPath) => {
+function normalizeActorPathPoints(value: unknown, path: string, legacySource: boolean): ActorPathPoint[] {
+  const points = normalizeCollection(value, path, VCAMERA_LIMITS.collections.pathPointsPerEntity, (item, itemPath) => {
     const point = projectRecord(item, itemPath, ["id", "time", "position", "yaw", "easing"]);
     return {
       id: projectText(point.id, `${itemPath}.id`),
@@ -479,23 +534,60 @@ function normalizePathPoints(value: unknown, path: string): PathPoint[] {
         : { yaw: projectNumber(point.yaw, `${itemPath}.yaw`, VCAMERA_LIMITS.rotation.minimum, VCAMERA_LIMITS.rotation.maximum) }),
       ...(point.easing == null ? {} : { easing: projectChoice(point.easing, `${itemPath}.easing`, SCENE_EASINGS) }),
     };
-  }).sort((a, b) => a.time - b.time);
+  }).sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  return normalizePathTimes(points, path, legacySource);
 }
 
-function normalizeCameraPathPoints(value: unknown, path: string): CameraPathPoint[] {
-  return normalizeCollection(value, path, VCAMERA_LIMITS.collections.pathPointsPerEntity, (item, itemPath) => {
-    const point = projectRecord(item, itemPath, ["id", "time", "position", "yaw", "easing", "rotation", "fov", "focusDistance"]);
+function normalizePropPathPoints(value: unknown, path: string, legacySource: boolean): PropPathPoint[] {
+  const points = normalizeCollection(value, path, VCAMERA_LIMITS.collections.pathPointsPerEntity, (item, itemPath) => {
+    const point = projectRecord(
+      item,
+      itemPath,
+      legacySource
+        ? ["id", "time", "position", "yaw", "rotation", "easing"]
+        : ["id", "time", "position", "rotation", "easing"],
+    );
+    const rotation = point.rotation == null && legacySource && point.yaw != null
+      ? [0, projectNumber(point.yaw, `${itemPath}.yaw`, VCAMERA_LIMITS.rotation.minimum, VCAMERA_LIMITS.rotation.maximum), 0] as Vec3
+      : point.rotation == null
+        ? undefined
+        : projectVec3(point.rotation, `${itemPath}.rotation`, VCAMERA_LIMITS.rotation.maximum);
     return {
       id: projectText(point.id, `${itemPath}.id`),
       time: projectNumber(point.time, `${itemPath}.time`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum),
       position: projectVec3(point.position, `${itemPath}.position`),
-      ...(point.yaw == null ? {} : { yaw: projectNumber(point.yaw, `${itemPath}.yaw`, VCAMERA_LIMITS.rotation.minimum, VCAMERA_LIMITS.rotation.maximum) }),
+      ...(rotation ? { rotation } : {}),
       ...(point.easing == null ? {} : { easing: projectChoice(point.easing, `${itemPath}.easing`, SCENE_EASINGS) }),
-      ...(point.rotation == null ? {} : { rotation: projectVec3(point.rotation, `${itemPath}.rotation`, VCAMERA_LIMITS.rotation.maximum) }),
+    };
+  }).sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  return normalizePathTimes(points, path, legacySource);
+}
+
+function normalizeCameraPathPoints(value: unknown, path: string, legacySource: boolean): CameraPathPoint[] {
+  const points = normalizeCollection(value, path, VCAMERA_LIMITS.collections.pathPointsPerEntity, (item, itemPath) => {
+    const point = projectRecord(
+      item,
+      itemPath,
+      legacySource
+        ? ["id", "time", "position", "yaw", "easing", "rotation", "fov", "focusDistance"]
+        : ["id", "time", "position", "easing", "rotation", "fov", "focusDistance"],
+    );
+    const rotation = point.rotation == null && legacySource && point.yaw != null
+      ? [0, projectNumber(point.yaw, `${itemPath}.yaw`, VCAMERA_LIMITS.rotation.minimum, VCAMERA_LIMITS.rotation.maximum), 0] as Vec3
+      : point.rotation == null
+        ? undefined
+        : projectVec3(point.rotation, `${itemPath}.rotation`, VCAMERA_LIMITS.rotation.maximum);
+    return {
+      id: projectText(point.id, `${itemPath}.id`),
+      time: projectNumber(point.time, `${itemPath}.time`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum),
+      position: projectVec3(point.position, `${itemPath}.position`),
+      ...(point.easing == null ? {} : { easing: projectChoice(point.easing, `${itemPath}.easing`, SCENE_EASINGS) }),
+      ...(rotation ? { rotation } : {}),
       ...(point.fov == null ? {} : { fov: projectNumber(point.fov, `${itemPath}.fov`, VCAMERA_LIMITS.fov.minimum, VCAMERA_LIMITS.fov.maximum) }),
       ...(point.focusDistance == null ? {} : { focusDistance: projectNumber(point.focusDistance, `${itemPath}.focusDistance`, VCAMERA_LIMITS.focusDistance.minimum, VCAMERA_LIMITS.focusDistance.maximum) }),
     };
-  }).sort((a, b) => a.time - b.time);
+  }).sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+  return normalizePathTimes(points, path, legacySource);
 }
 
 function normalizeCollection<T>(
@@ -510,13 +602,63 @@ function normalizeCollection<T>(
   return value.map((item, index) => normalizer(item, `${path}[${index}]`));
 }
 
-function ensureUniqueProjectIds(items: Array<{ id: string; pathPoints?: PathPoint[] }>, path: string): void {
+function ensureUniqueProjectIds(items: Array<{ id: string; pathPoints?: ScenePathPoint[] }>, path: string): void {
   const ids = new Set<string>();
   for (const [index, item] of items.entries()) {
     if (ids.has(item.id)) invalidProject(path, `contains duplicate id ${item.id}`);
     ids.add(item.id);
     if (item.pathPoints) ensureUniqueProjectIds(item.pathPoints, `${path}[${index}].pathPoints`);
   }
+}
+
+function normalizeProjectVersion(value: unknown): 1 | 2 | 3 {
+  const version = value === undefined ? 1 : Number(value);
+  if (version !== 1 && version !== 2 && version !== 3) {
+    invalidProject("version", "must be 1, 2, or 3");
+  }
+  return version;
+}
+
+function normalizePathTimes<T extends ScenePathPoint>(points: T[], path: string, legacySource: boolean): T[] {
+  if (!legacySource) {
+    ensureUniquePathTimes(points, path);
+    return points;
+  }
+  let previousTime = -0.001;
+  return points.map((point) => {
+    const time = point.time <= previousTime ? round(previousTime + 0.001) : point.time;
+    if (time > VCAMERA_LIMITS.sceneTime.maximum) {
+      invalidProject(path, "cannot migrate duplicate times beyond the scene limit");
+    }
+    previousTime = time;
+    return time === point.time ? point : { ...point, time };
+  });
+}
+
+function ensureUniquePathTimes(points: ScenePathPoint[], label: string): void {
+  const times = new Set<number>();
+  for (const point of points) {
+    const time = round(point.time);
+    if (times.has(time)) throw new Error(`${label} contains duplicate time ${time}`);
+    times.add(time);
+  }
+}
+
+function parseScenePathPoint(item: Record<string, unknown>, index: number, label: string): ScenePathPoint {
+  const position = Array.isArray(item.position)
+    ? parseVec3(item.position.join(","), `${label} ${index + 1} position`)
+    : parseVec3(String(item.position ?? ""), `${label} ${index + 1} position`);
+  const time = Number(item.time);
+  if (!Number.isFinite(time) || time < VCAMERA_LIMITS.sceneTime.minimum || time > VCAMERA_LIMITS.sceneTime.maximum) {
+    throw new Error(`${label} ${index + 1} time must be between ${VCAMERA_LIMITS.sceneTime.minimum} and ${VCAMERA_LIMITS.sceneTime.maximum}`);
+  }
+  const easing = item.easing === undefined ? undefined : parseEasing(item.easing, `${label} ${index + 1} easing`);
+  return {
+    id: typeof item.id === "string" && item.id.trim() ? item.id : `path_${randomUUID()}`,
+    time,
+    position: position as Vec3,
+    ...(easing !== undefined ? { easing } : {}),
+  };
 }
 
 function repairProjectReferences(project: VCameraProject): VCameraProject {

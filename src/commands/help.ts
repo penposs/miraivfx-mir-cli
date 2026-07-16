@@ -40,6 +40,7 @@ Usage:
   mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "Hero" --position "0,0,0" --yes --json
   mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "Hero" --time 2.125 --position "2,0,4" --yes --json
   mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "Camera A" --movement-mode path --aim-mode actor --tracking-actor "Hero" --motion-preset orbit_left --yes --json
+  mir-cli canvas v-camera camera preset --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --preset push_in --start-time 8 --duration 5 --yes --json
   mir-cli canvas v-camera camera path set --canvas-id <canvas_id> --camera "Camera A" --points-json '[{"time":8,"position":[0,1.6,6]},{"time":13,"position":[2,1.6,3],"fov":52}]' --yes --json
   mir-cli canvas v-camera shot add --canvas-id <canvas_id> --name "S02 Push in" --camera "Camera A" --start-time 8 --duration 5 --yes --json
   mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera A" --time 4.5 --yes --json

@@ -20,6 +20,7 @@ import {
   normalizeProject,
   parseCameraPathPoints,
   parsePathPoints,
+  parsePropPathPoints,
   parseVec3,
   PathPoint,
   PROP_DEFAULTS,
@@ -32,6 +33,8 @@ import {
   VCameraProject,
   Vec3,
 } from "../v-camera/project.js";
+import { createCameraPresetPatch, mergePresetPathPoints } from "../v-camera/camera-presets.js";
+import { getProjectSpatialSummary } from "../v-camera/spatial.js";
 
 interface CanvasData {
   id: string;
@@ -542,9 +545,6 @@ function mutateProp(project: VCameraProject, action: string, args: string[]) {
 
 function mutateCamera(project: VCameraProject, action: string, args: string[]) {
   const cameras = clone(project.cameras);
-  if (action === "preset") {
-    throw new Error("camera preset is unavailable in mir-cli. Provide exact global-time camera keyframes with camera set plus camera path set.");
-  }
   if (action === "add") {
     ensureCollectionCapacity(cameras, VCAMERA_LIMITS.collections.cameras, "cameras");
     const id = getFlagValue(args, "--id") ?? `camera_${randomUUID()}`;
@@ -579,6 +579,63 @@ function mutateCamera(project: VCameraProject, action: string, args: string[]) {
   const selector = requireFlag(args, "--camera");
   const camera = resolveByIdOrName(cameras, selector, "Camera");
   const index = cameras.findIndex((item) => item.id === camera.id);
+  if (action === "preset") {
+    const presetValue = requireFlag(args, "--preset");
+    if (!isMotionPreset(presetValue)) throw new Error("Invalid --preset");
+    const startTime = optionalNumber(
+      args,
+      "--start-time",
+      VCAMERA_LIMITS.sceneTime.minimum,
+      VCAMERA_LIMITS.sceneTime.maximum,
+    ) ?? 0;
+    const duration = requiredNumber(
+      args,
+      "--duration",
+      VCAMERA_LIMITS.positiveSceneTime.minimum,
+      VCAMERA_LIMITS.positiveSceneTime.maximum,
+    );
+    if (startTime + duration > VCAMERA_LIMITS.sceneTime.maximum) {
+      throw new Error(`--start-time + --duration cannot exceed ${VCAMERA_LIMITS.sceneTime.maximum}`);
+    }
+    const actorSelector = getFlagValue(args, "--actor");
+    const actor = actorSelector ? resolveByIdOrName(project.actors, actorSelector, "Actor") : undefined;
+    const actorRequired = !["pan_left", "pan_right", "tilt_up", "tilt_down", "zoom_in", "zoom_out"].includes(presetValue);
+    if (actorRequired && !actor) throw new Error(`--actor is required for ${presetValue}`);
+    const easingValue = getFlagValue(args, "--easing") ?? "smooth";
+    if (!(SCENE_EASINGS as readonly string[]).includes(easingValue)) throw new Error("Invalid --easing");
+    const amountScale = optionalNumber(args, "--amount", 0.5, 1.5) ?? 1;
+    const preserveSubjectScale = optionalBoolean(args, "--preserve-subject-scale") ?? true;
+    const generatedPatch = createCameraPresetPatch({
+      preset: presetValue,
+      camera,
+      actor,
+      startTime,
+      duration,
+      easing: easingValue as SceneEasing,
+      amountScale,
+      preserveSubjectScale,
+    });
+    const generatedPoints = generatedPatch.pathPoints ?? [];
+    const pathPoints = generatedPoints.length > 0
+      ? mergePresetPathPoints(camera.pathPoints, generatedPoints, startTime, startTime + duration)
+      : camera.pathPoints;
+    cameras[index] = {
+      ...camera,
+      ...generatedPatch,
+      pathPoints,
+    };
+    return {
+      patch: {
+        cameras,
+        ...(startTime + duration > project.duration ? { duration: startTime + duration } : {}),
+      },
+      operation: "camera.preset",
+      entityId: camera.id,
+      sideEffects: generatedPoints.length > 0
+        ? [`Generated editable camera path points from ${startTime}s to ${startTime + duration}s.`]
+        : ["Applied explicit camera tracking settings without creating artificial path points."],
+    };
+  }
   if (action === "set") {
     const name = getFlagValue(args, "--name");
     const position = parseVec3(getFlagValue(args, "--position"), "--position");
@@ -988,7 +1045,15 @@ function mutatePath<T extends { id: string; name: string; position: Vec3; pathPo
     const time = requiredNumber(args, "--time", VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum);
     const position = parseVec3(getFlagValue(args, "--position"), "--position");
     if (!position) throw new Error("--position is required");
-    const yaw = optionalNumber(args, "--yaw", VCAMERA_LIMITS.rotation.minimum, VCAMERA_LIMITS.rotation.maximum);
+    const yaw = subject === "actor"
+      ? optionalNumber(args, "--yaw", VCAMERA_LIMITS.rotation.minimum, VCAMERA_LIMITS.rotation.maximum)
+      : undefined;
+    if (subject !== "actor" && getFlagValue(args, "--yaw") !== undefined) {
+      throw new Error(`${subject} path points use --rotation, not --yaw`);
+    }
+    const rotation = subject !== "actor"
+      ? parseRotationVec3(getFlagValue(args, "--rotation"), "--rotation")
+      : undefined;
     const easingValue = getFlagValue(args, "--easing");
     if (easingValue !== undefined && !(SCENE_EASINGS as readonly string[]).includes(easingValue)) throw new Error("Invalid --easing");
     const id = getFlagValue(args, "--id") ?? `path_${randomUUID()}`;
@@ -999,9 +1064,7 @@ function mutatePath<T extends { id: string; name: string; position: Vec3; pathPo
       position,
       ...(yaw !== undefined ? { yaw } : {}),
       ...(easingValue !== undefined ? { easing: easingValue as SceneEasing } : {}),
-      ...(subject === "camera" && getFlagValue(args, "--rotation") !== undefined
-        ? { rotation: parseRotationVec3(getFlagValue(args, "--rotation"), "--rotation") }
-        : {}),
+      ...(rotation ? { rotation } : {}),
       ...(subject === "camera" && getFlagValue(args, "--fov") !== undefined
         ? { fov: requiredNumber(args, "--fov", VCAMERA_LIMITS.fov.minimum, VCAMERA_LIMITS.fov.maximum) }
         : {}),
@@ -1012,7 +1075,9 @@ function mutatePath<T extends { id: string; name: string; position: Vec3; pathPo
   } else if (action === "path-set") {
     pathPoints = subject === "camera"
       ? parseCameraPathPoints(getFlagValue(args, "--points-json"))
-      : parsePathPoints(getFlagValue(args, "--points-json"));
+      : subject === "prop"
+        ? parsePropPathPoints(getFlagValue(args, "--points-json"))
+        : parsePathPoints(getFlagValue(args, "--points-json"));
     if (pathPoints.length > VCAMERA_LIMITS.collections.pathPointsPerEntity) {
       throw new Error(`${subject} path points cannot exceed ${VCAMERA_LIMITS.collections.pathPointsPerEntity}`);
     }
@@ -1022,17 +1087,25 @@ function mutatePath<T extends { id: string; name: string; position: Vec3; pathPo
     if (pointIndex < 0) throw new Error(`Path point not found: ${pointId}`);
     const time = optionalNumber(args, "--time", VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum);
     const position = parseVec3(getFlagValue(args, "--position"), "--position");
-    const yaw = optionalNumber(args, "--yaw", VCAMERA_LIMITS.rotation.minimum, VCAMERA_LIMITS.rotation.maximum);
+    const yaw = subject === "actor"
+      ? optionalNumber(args, "--yaw", VCAMERA_LIMITS.rotation.minimum, VCAMERA_LIMITS.rotation.maximum)
+      : undefined;
+    if (subject !== "actor" && getFlagValue(args, "--yaw") !== undefined) {
+      throw new Error(`${subject} path points use --rotation, not --yaw`);
+    }
     const easingValue = getFlagValue(args, "--easing");
     if (easingValue !== undefined && !(SCENE_EASINGS as readonly string[]).includes(easingValue)) throw new Error("Invalid --easing");
-    const clearYaw = hasFlag(args, "--clear-yaw");
+    const clearYaw = subject === "actor" && hasFlag(args, "--clear-yaw");
+    if (subject !== "actor" && hasFlag(args, "--clear-yaw")) {
+      throw new Error(`${subject} path points do not support --clear-yaw`);
+    }
     const clearEasing = hasFlag(args, "--clear-easing");
-    const rotation = subject === "camera" ? parseRotationVec3(getFlagValue(args, "--rotation"), "--rotation") : undefined;
+    const rotation = subject !== "actor" ? parseRotationVec3(getFlagValue(args, "--rotation"), "--rotation") : undefined;
     const fov = subject === "camera" ? optionalNumber(args, "--fov", VCAMERA_LIMITS.fov.minimum, VCAMERA_LIMITS.fov.maximum) : undefined;
     const focusDistance = subject === "camera"
       ? optionalNumber(args, "--focus-distance", VCAMERA_LIMITS.focusDistance.minimum, VCAMERA_LIMITS.focusDistance.maximum)
       : undefined;
-    const clearRotation = subject === "camera" && hasFlag(args, "--clear-rotation");
+    const clearRotation = subject !== "actor" && hasFlag(args, "--clear-rotation");
     const clearFov = subject === "camera" && hasFlag(args, "--clear-fov");
     const clearFocusDistance = subject === "camera" && hasFlag(args, "--clear-focus-distance");
     if (yaw !== undefined && clearYaw) throw new Error("Use either --yaw or --clear-yaw");
@@ -1069,8 +1142,9 @@ function mutatePath<T extends { id: string; name: string; position: Vec3; pathPo
   } else {
     throw new Error(`Unsupported ${subject} action: ${action}`);
   }
-  pathPoints.sort((a, b) => a.time - b.time);
+  pathPoints.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
   ensureUniquePathPointIds(pathPoints);
+  ensureUniquePathPointTimes(pathPoints);
   const zeroPoint = pathPoints.find((point) => point.time <= 0);
   owners[index] = {
     ...owner,
@@ -1107,7 +1181,13 @@ async function inspectVCamera(api: ApiClient, args: string[], asJson: boolean): 
   const node = findVCameraNode(canvas, requestedNodeId);
   const project = normalizeProject(getNodeProject(node));
   if (asJson) {
-    json({ canvas_id: canvas.id, node_id: String(node.id), revision: canvas.revision ?? 0, project });
+    json({
+      canvas_id: canvas.id,
+      node_id: String(node.id),
+      revision: canvas.revision ?? 0,
+      project,
+      spatial_summary: getProjectSpatialSummary(project),
+    });
     return;
   }
   text([
@@ -1228,6 +1308,15 @@ function ensureUniquePathPointIds(points: PathPoint[]): void {
   }
 }
 
+function ensureUniquePathPointTimes(points: PathPoint[]): void {
+  const times = new Set<number>();
+  for (const point of points) {
+    const time = Number(point.time.toFixed(3));
+    if (times.has(time)) throw new Error(`Path point time already exists: ${time}`);
+    times.add(time);
+  }
+}
+
 function requireFlag(args: string[], flag: string): string {
   const value = getFlagValue(args, flag);
   if (!value) throw new Error(`${flag} is required`);
@@ -1308,6 +1397,7 @@ export function vCameraUsage(): string {
     "  actor/prop/camera: add | set | translate | delete | path add | path set | path update | path delete | path clear",
     "  actor: action add | action set | action delete | action clear",
     "  prop: visibility add | visibility set | visibility delete | visibility clear",
+    "  camera: preset --preset <name> --start-time <seconds> --duration <seconds>",
     "  camera: follow | aim are compound helpers; automation should use camera set",
     "  shot: add | set | delete",
     "  cut: add | set | delete | clear",

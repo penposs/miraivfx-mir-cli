@@ -11,7 +11,9 @@ import {
   resolveByIdOrName,
 } from "../dist/v-camera/project.js";
 import { handleVCameraCommand } from "../dist/commands/v-camera.js";
+import { createCameraPresetPatch } from "../dist/v-camera/camera-presets.js";
 import { VCAMERA_CONTRACT } from "../dist/v-camera/contract.js";
+import { getActorBasePoseBounds, getProjectSpatialSummary, getPropBasePoseBounds } from "../dist/v-camera/spatial.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -43,9 +45,110 @@ const camera = {
 
 test("default project starts with editable V-camera collections", () => {
   const project = defaultVCameraProject();
+  assert.equal(project.version, 3);
   assert.equal(project.duration, 1);
   assert.deepEqual(project.actors, []);
   assert.deepEqual(project.cameraCuts, []);
+});
+
+test("props without an explicit proxy preset use the published box fallback", () => {
+  const project = normalizeProject({
+    ...defaultVCameraProject(),
+    cubes: [{
+      id: "prop-1",
+      name: "Reference",
+      position: [0, 0.5, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      visible: true,
+      locked: false,
+      sourceType: "primitive",
+      pathPoints: [],
+    }],
+  });
+
+  assert.equal(project.cubes[0].propPreset, "box");
+});
+
+test("legacy path data migrates to version 3 with stable duplicate timing and typed rotations", () => {
+  const project = normalizeProject({
+    ...defaultVCameraProject(),
+    version: 2,
+    actors: [{
+      ...actor,
+      pathPoints: [
+        { id: "b", time: 1, position: [2, 0, 0] },
+        { id: "a", time: 1, position: [1, 0, 0] },
+      ],
+    }],
+    cubes: [{
+      id: "prop-1",
+      name: "Wall",
+      position: [0, 0.5, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      visible: true,
+      locked: false,
+      sourceType: "primitive",
+      pathPoints: [{ id: "prop-path", time: 2, position: [1, 0.5, 0], yaw: 45 }],
+    }],
+    cameras: [{
+      ...camera,
+      pathPoints: [{ id: "camera-path", time: 2, position: [0, 1.6, 2], yaw: -30 }],
+    }],
+  });
+  assert.equal(project.version, 3);
+  assert.deepEqual(project.actors[0].pathPoints.map((point) => [point.id, point.time]), [
+    ["a", 1],
+    ["b", 1.001],
+  ]);
+  assert.deepEqual(project.cubes[0].pathPoints[0].rotation, [0, 45, 0]);
+  assert.deepEqual(project.cameras[0].pathPoints[0].rotation, [0, -30, 0]);
+});
+
+test("version 3 rejects duplicate path times and camera yaw", () => {
+  assert.throws(() => normalizeProject({
+    ...defaultVCameraProject(),
+    actors: [{
+      ...actor,
+      pathPoints: [
+        { id: "a", time: 1, position: [1, 0, 0] },
+        { id: "b", time: 1, position: [2, 0, 0] },
+      ],
+    }],
+  }), /duplicate time 1/);
+  assert.throws(() => parseCameraPathPoints(JSON.stringify([
+    { id: "camera-path", time: 1, position: [0, 1.6, 2], yaw: 45 },
+  ])), /yaw is not supported/);
+});
+
+test("proxy geometry exposes base-pose world bounds and obvious camera intersections", () => {
+  const prop = {
+    id: "prop-1",
+    name: "Box",
+    position: [0, 0.5, 0],
+    rotation: [0, 0, 0],
+    scale: [2, 1, 4],
+    visible: true,
+    locked: false,
+    sourceType: "primitive",
+    pathPoints: [],
+  };
+  assert.deepEqual(getPropBasePoseBounds(prop), {
+    min: [-1, 0, -2],
+    max: [1, 1, 2],
+    center: [0, 0.5, 0],
+    size: [2, 1, 4],
+  });
+  assert.equal(getActorBasePoseBounds(actor).min[1], 0);
+  const summary = getProjectSpatialSummary({
+    ...defaultVCameraProject(),
+    actors: [actor],
+    cubes: [prop],
+    cameras: [{ ...camera, position: [0, 0.5, 0] }],
+  });
+  assert.equal(summary.scope, "base_pose_proxy_bounds");
+  assert.ok(summary.cameraIntersections.some((item) => item.entityId === prop.id));
 });
 
 test("incomplete cameras receive the current motion fields", () => {
@@ -429,11 +532,11 @@ test("stair step counts must be integers for both add and set", async () => {
   await assert.rejects(() => handleVCameraCommand(api, "https://miraivfx.art", [
     "prop", "add", "--canvas-id", "canvas-1", "--preset", "stairs",
     "--steps", "2.5", "--dry-run",
-  ], false), /--steps must be an integer between 2 and 64/);
+  ], false), /--steps must be an integer between 2 and 20/);
   await assert.rejects(() => handleVCameraCommand(api, "https://miraivfx.art", [
     "prop", "set", "--canvas-id", "canvas-1", "--prop", stairs.id,
     "--steps", "2.5", "--dry-run",
-  ], false), /--steps must be an integer between 2 and 64/);
+  ], false), /--steps must be an integer between 2 and 20/);
 });
 
 test("actor path edits keep anchored cuts aligned and synchronize the origin", async () => {
@@ -519,12 +622,15 @@ test("Virtual Shoot capabilities is offline and machine readable", async () => {
     },
   });
   const contract = JSON.parse(stdout);
-  assert.equal(contract.contractVersion, 1);
-  assert.equal(contract.projectVersion, 2);
-  assert.equal(contract.timeline.mode, "global");
+  assert.equal(contract.contractVersion, 2);
+  assert.equal(contract.projectVersion, 3);
+  assert.equal(contract.timeline.mode, "single_global_timeline");
   assert.equal(contract.timeline.maximum, 3600);
   assert.equal(contract.fields.camera.fov.maximum, 179);
-  assert.equal(contract.fields.camera.motionPreset.notes[0], "Metadata only. Camera keyframes are supplied through path commands.");
+  assert.equal(contract.fields.camera.motionPreset.notes[0], "Metadata only. Applying a preset generates editable global-time keyframes or follow settings.");
+  assert.equal(contract.spatial.unit, "meter");
+  assert.equal(contract.spatial.camera.fovType, "vertical");
+  assert.equal(contract.runtimeEffects["camera.pathPoints.focusDistance"], "metadata-only");
   assert.ok(contract.protectedFields.includes("project.takes"));
   assert.equal(contract.limits.sceneTime.maximum, 3600);
   assert.equal(contract.limits.scale.maximum, 10000);
@@ -557,6 +663,9 @@ test("capabilities covers every formal scene entity field", () => {
   ]);
   assert.deepEqual(Object.keys(VCAMERA_CONTRACT.fields.cameraCut).sort(), [
     "anchor", "cameraId", "id", "shotId", "time",
+  ]);
+  assert.deepEqual(Object.keys(VCAMERA_CONTRACT.fields.propPathPoint).sort(), [
+    "easing", "id", "position", "rotation", "time",
   ]);
 });
 
@@ -747,10 +856,83 @@ test("prop optional primitive fields can be cleared explicitly", async () => {
   assert.equal("stepCount" in updated, false);
 });
 
-test("camera preset returns a specific unavailable-command error", async () => {
-  await assert.rejects(() => handleVCameraCommand(mutationApi(defaultVCameraProject(), []), "https://miraivfx.art", [
-    "camera", "preset", "--canvas-id", "canvas-1", "--camera", "camera-1", "--dry-run",
-  ], false), /is unavailable/);
+test("camera preset creates globally timed editable paths and expands project duration", async () => {
+  const calls = [];
+  await withMutedConsole(() => handleVCameraCommand(mutationApi({
+    ...defaultVCameraProject(),
+    actors: [actor],
+    cameras: [camera],
+    activeCameraId: camera.id,
+  }, calls), "https://miraivfx.art", [
+    "camera", "preset", "--canvas-id", "canvas-1", "--camera", camera.id,
+    "--actor", actor.id, "--preset", "push_in", "--start-time", "8", "--duration", "5",
+    "--yes", "--json",
+  ], true));
+  const patch = calls.find((call) => call.method === "POST").body.patch;
+  assert.deepEqual(patch.cameras[0].pathPoints.map((point) => point.time), [8, 13]);
+  assert.equal(patch.cameras[0].motionPreset, "push_in");
+  assert.equal(patch.duration, 13);
+});
+
+test("camera presets sample actor motion with the same eased cubic path used by the node", () => {
+  const movingActor = {
+    ...actor,
+    pathPoints: [
+      { id: "p1", time: 10, position: [10, 0, 0], easing: "smooth" },
+      { id: "p2", time: 20, position: [0, 0, 0], easing: "smooth" },
+    ],
+  };
+  const input = {
+    preset: "push_in",
+    camera,
+    startTime: 5,
+    duration: 2,
+    easing: "smooth",
+    amountScale: 1,
+    preserveSubjectScale: true,
+  };
+  const movingPatch = createCameraPresetPatch({ ...input, actor: movingActor });
+  const expectedPatch = createCameraPresetPatch({
+    ...input,
+    actor: { ...actor, position: [5.625, 0, 0] },
+  });
+
+  assert.deepEqual(
+    movingPatch.pathPoints.map((point) => point.position),
+    expectedPatch.pathPoints.map((point) => point.position),
+  );
+});
+
+test("orbit preset offsets every generated keyframe and tracking presets do not fake zero-time points", async () => {
+  const orbitCalls = [];
+  await withMutedConsole(() => handleVCameraCommand(mutationApi({
+    ...defaultVCameraProject(),
+    actors: [actor],
+    cameras: [camera],
+  }, orbitCalls), "https://miraivfx.art", [
+    "camera", "preset", "--canvas-id", "canvas-1", "--camera", camera.id,
+    "--actor", actor.id, "--preset", "orbit_left", "--start-time", "8", "--duration", "5",
+    "--yes", "--json",
+  ], true));
+  const orbit = orbitCalls.find((call) => call.method === "POST").body.patch.cameras[0];
+  assert.equal(orbit.pathPoints[0].time, 8);
+  assert.equal(orbit.pathPoints.at(-1).time, 13);
+  assert.ok(orbit.pathPoints.every((point) => point.time >= 8));
+
+  const trackingCalls = [];
+  await withMutedConsole(() => handleVCameraCommand(mutationApi({
+    ...defaultVCameraProject(),
+    actors: [actor],
+    cameras: [camera],
+  }, trackingCalls), "https://miraivfx.art", [
+    "camera", "preset", "--canvas-id", "canvas-1", "--camera", camera.id,
+    "--actor", actor.id, "--preset", "fixed_tracking", "--start-time", "8", "--duration", "5",
+    "--yes", "--json",
+  ], true));
+  const tracking = trackingCalls.find((call) => call.method === "POST").body.patch.cameras[0];
+  assert.deepEqual(tracking.pathPoints, []);
+  assert.equal(tracking.movementMode, "static");
+  assert.equal(tracking.aimMode, "actor");
 });
 
 test("action markers and visibility keyframes update in place", async () => {

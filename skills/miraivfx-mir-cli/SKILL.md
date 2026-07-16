@@ -45,7 +45,7 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 9. Use `shot add/set/delete` for the planned shot sequence. A shot synchronizes its camera cut at `shot.startTime`; main-timeline shots must not overlap.
 10. Supply staging, camera placement, shot order, movement curves, tracking targets, and easing explicitly through raw fields and keyframes.
 11. Use raw `camera set` to map movement mode, aim mode, tracking actor, tracking point, follow offset, follow speed, look-at point, and motion-preset metadata. Automated systems must not use the compound `camera follow` or `camera aim` helpers.
-12. `motionPreset` is metadata only. Never invoke `camera preset` or derive camera keyframes from a preset name inside the CLI.
+12. `motionPreset` itself is metadata only. Use `camera preset` only when the caller explicitly requests one of the node's published presets; otherwise write exact camera fields and global-time keyframes directly.
 13. Use `camera path set --points-json` or `camera path update` for exact position, rotation, field-of-view, focus-distance, and easing keyframes supplied by the caller. These times are already global and must never be converted to shot-local time.
 14. Use `actor action set`, `prop visibility set`, and `cut set --actor --point|--clear-anchor` to update stable child IDs instead of deleting and recreating them.
 15. Use `cut add --time` for timeline switching outside the shot sequence. For actor-path switching, pass both `--actor` and `--point`; the CLI derives the cut time from that point.
