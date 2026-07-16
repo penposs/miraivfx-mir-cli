@@ -1,33 +1,21 @@
 import { randomUUID } from "node:crypto";
+import {
+  VCAMERA_DEFAULTS,
+  VCAMERA_ENUMS,
+  VCAMERA_LIMITS,
+} from "./contract.js";
 
 export type Vec3 = [number, number, number];
 export type SafeFrameRatio = "off" | "9:16" | "16:9" | "1:1";
+export type SceneEasing = "smooth" | "linear" | "ease_in" | "ease_out" | "ease_in_out";
+export const SCENE_EASINGS = VCAMERA_ENUMS.sceneEasing;
 export type CameraMovementMode = "static" | "path" | "follow";
-export type CameraAimMode = "manual" | "actor";
+export type CameraAimMode = "manual" | "actor" | "point";
 export type CameraTrackingPoint = "head" | "chest" | "center";
-export const CAMERA_MOTION_PRESETS = [
-  "push_in",
-  "pull_out",
-  "truck_left",
-  "truck_right",
-  "fixed_tracking",
-  "lead_follow",
-  "chase_follow",
-  "orbit_left",
-  "orbit_right",
-] as const;
+export const CAMERA_MOTION_PRESETS = VCAMERA_ENUMS.cameraMotionPreset;
 export type CameraMotionPreset = typeof CAMERA_MOTION_PRESETS[number];
 
-export const PROP_PRESETS = [
-  "box",
-  "thin_wall",
-  "column",
-  "platform",
-  "obstacle",
-  "door_frame",
-  "stairs",
-  "slope",
-] as const;
+export const PROP_PRESETS = VCAMERA_ENUMS.propPreset;
 export type PropPreset = typeof PROP_PRESETS[number];
 
 export interface PathPoint {
@@ -35,6 +23,13 @@ export interface PathPoint {
   time: number;
   position: Vec3;
   yaw?: number;
+  easing?: SceneEasing;
+}
+
+export interface CameraPathPoint extends PathPoint {
+  rotation?: Vec3;
+  fov?: number;
+  focusDistance?: number;
 }
 
 export interface Actor {
@@ -43,6 +38,15 @@ export interface Actor {
   position: Vec3;
   rotation: Vec3;
   height: number;
+  lookAtActorId?: string | null;
+  lookAtPoint?: Vec3 | null;
+  actionMarkers?: Array<{
+    id: string;
+    time: number;
+    action: string;
+    targetActorId?: string;
+    targetPoint?: Vec3;
+  }>;
   pathPoints: PathPoint[];
 }
 
@@ -56,6 +60,9 @@ export interface Prop {
   locked: boolean;
   propPreset?: PropPreset;
   stepCount?: number;
+  sourceType?: "primitive" | "asset";
+  assetId?: string;
+  visibilityKeyframes?: Array<{ id: string; time: number; visible: boolean }>;
   pathPoints: PathPoint[];
 }
 
@@ -65,11 +72,13 @@ export interface Camera {
   position: Vec3;
   rotation: Vec3;
   fov: number;
+  focusDistance?: number;
   duration: number;
-  pathPoints: PathPoint[];
+  pathPoints: CameraPathPoint[];
   movementMode: CameraMovementMode;
   aimMode: CameraAimMode;
   trackingActorId: string | null;
+  lookAtPoint?: Vec3 | null;
   trackingPoint: CameraTrackingPoint;
   followOffset: Vec3;
   followSpeed: number;
@@ -80,6 +89,7 @@ export interface CameraCut {
   id: string;
   time: number;
   cameraId: string;
+  shotId?: string;
   anchor?: {
     kind: "actor_path_point";
     actorId: string;
@@ -87,8 +97,18 @@ export interface CameraCut {
   };
 }
 
+export interface CameraShot {
+  id: string;
+  name: string;
+  startTime: number;
+  endTime: number;
+  cameraId: string;
+  locked: boolean;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
 export interface VCameraProject extends Record<string, unknown> {
-  version: 1;
+  version: 1 | 2;
   name: string;
   fps: number;
   duration: number;
@@ -99,6 +119,7 @@ export interface VCameraProject extends Record<string, unknown> {
   actors: Actor[];
   cameras: Camera[];
   cameraCuts: CameraCut[];
+  shots: CameraShot[];
   activeCameraId: string | null;
 }
 
@@ -115,17 +136,18 @@ export const PROP_DEFAULTS: Record<PropPreset, { name: string; scale: Vec3 }> = 
 
 export function defaultVCameraProject(): VCameraProject {
   return {
-    version: 1,
-    name: "Virtual Shoot stage",
-    fps: 24,
-    duration: 30,
+    version: 2,
+    name: VCAMERA_DEFAULTS.project.name,
+    fps: VCAMERA_DEFAULTS.project.fps,
+    duration: VCAMERA_DEFAULTS.project.duration,
     currentTime: 0,
     isPlaying: false,
-    safeFrameRatio: "off",
+    safeFrameRatio: VCAMERA_DEFAULTS.project.safeFrameRatio,
     cubes: [],
     actors: [],
     cameras: [],
     cameraCuts: [],
+    shots: [],
     takes: [],
     activeCameraId: null,
     savedScenes: [],
@@ -136,30 +158,38 @@ export function defaultVCameraProject(): VCameraProject {
 export function normalizeProject(value: unknown): VCameraProject {
   const defaults = defaultVCameraProject();
   const source = isRecord(value) ? clone(value) : defaults;
-  const cubes = normalizeCollection(source.cubes, "cubes", 500, normalizeProp);
-  const actors = normalizeCollection(source.actors, "actors", 200, normalizeActor);
-  const cameras = normalizeCollection(source.cameras, "cameras", 100, normalizeCameraAt);
-  const cameraCuts = normalizeCollection(source.cameraCuts, "cameraCuts", 2000, normalizeCameraCut);
+  const cubes = normalizeCollection(source.cubes, "cubes", VCAMERA_LIMITS.collections.props, normalizeProp);
+  const actors = normalizeCollection(source.actors, "actors", VCAMERA_LIMITS.collections.actors, normalizeActor);
+  const cameras = normalizeCollection(source.cameras, "cameras", VCAMERA_LIMITS.collections.cameras, normalizeCameraAt);
+  const cameraCuts = normalizeCollection(source.cameraCuts, "cameraCuts", VCAMERA_LIMITS.collections.cameraCuts, normalizeCameraCut);
+  const shots = normalizeCollection(source.shots, "shots", VCAMERA_LIMITS.collections.shots, normalizeCameraShot)
+    .sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
   ensureUniqueProjectIds(cubes, "cubes");
   ensureUniqueProjectIds(actors, "actors");
   ensureUniqueProjectIds(cameras, "cameras");
   ensureUniqueProjectIds(cameraCuts, "cameraCuts");
-  return {
+  ensureUniqueProjectIds(shots, "shots");
+  const project: VCameraProject = {
     ...defaults,
     ...source,
-    version: 1,
+    version: 2,
     name: source.name === undefined ? defaults.name : projectText(source.name, "name"),
-    fps: source.fps === undefined ? defaults.fps : projectNumber(source.fps, "fps", 1, 120),
-    duration: source.duration === undefined ? defaults.duration : projectNumber(source.duration, "duration", 0.01, 3600),
-    currentTime: source.currentTime === undefined ? defaults.currentTime : projectNumber(source.currentTime, "currentTime", 0, 3600),
+    fps: source.fps === undefined ? defaults.fps : projectNumber(source.fps, "fps", VCAMERA_LIMITS.fps.minimum, VCAMERA_LIMITS.fps.maximum),
+    duration: source.duration === undefined ? defaults.duration : projectNumber(source.duration, "duration", VCAMERA_LIMITS.positiveSceneTime.minimum, VCAMERA_LIMITS.positiveSceneTime.maximum),
+    currentTime: source.currentTime === undefined ? defaults.currentTime : projectNumber(source.currentTime, "currentTime", VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum),
     isPlaying: source.isPlaying === undefined ? defaults.isPlaying : projectBoolean(source.isPlaying, "isPlaying"),
     safeFrameRatio: normalizeSafeFrame(source.safeFrameRatio),
     cubes,
     actors,
     cameras,
-    cameraCuts,
+    cameraCuts: cameraCuts.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id)),
+    shots,
     activeCameraId: source.activeCameraId == null ? null : projectText(source.activeCameraId, "activeCameraId"),
   };
+  const repairedProject = repairProjectReferences(project);
+  validateProjectReferences(repairedProject);
+  repairedProject.duration = getProjectSceneEnd(repairedProject);
+  return repairedProject;
 }
 
 export function normalizeCamera(value: unknown): Camera {
@@ -168,11 +198,11 @@ export function normalizeCamera(value: unknown): Camera {
 
 function normalizeCameraAt(value: unknown, path: string): Camera {
   const camera = projectRecord(value, path, [
-    "id", "name", "position", "rotation", "fov", "duration", "pathPoints",
+    "id", "name", "position", "rotation", "fov", "focusDistance", "duration", "pathPoints",
     "movementMode", "aimMode", "trackingActorId", "trackingPoint", "followOffset",
-    "followSpeed", "motionPreset",
+    "followSpeed", "motionPreset", "lookAtPoint",
   ]);
-  const pathPoints = normalizePathPoints(camera.pathPoints, `${path}.pathPoints`);
+  const pathPoints = normalizeCameraPathPoints(camera.pathPoints, `${path}.pathPoints`);
   const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
   const position = projectVec3(camera.position, `${path}.position`);
   const movementMode = camera.movementMode === undefined
@@ -180,7 +210,7 @@ function normalizeCameraAt(value: unknown, path: string): Camera {
     : projectChoice(camera.movementMode, `${path}.movementMode`, ["static", "path", "follow"] as const);
   const aimMode = camera.aimMode === undefined
     ? "manual"
-    : projectChoice(camera.aimMode, `${path}.aimMode`, ["manual", "actor"] as const);
+    : projectChoice(camera.aimMode, `${path}.aimMode`, ["manual", "actor", "point"] as const);
   const trackingPoint = camera.trackingPoint === undefined
     ? "chest"
     : projectChoice(camera.trackingPoint, `${path}.trackingPoint`, ["head", "chest", "center"] as const);
@@ -191,20 +221,24 @@ function normalizeCameraAt(value: unknown, path: string): Camera {
     id: projectText(camera.id, `${path}.id`),
     name: projectText(camera.name, `${path}.name`),
     position: zeroPoint ? [...zeroPoint.position] : position,
-    rotation: projectVec3(camera.rotation, `${path}.rotation`, 36000),
-    fov: projectNumber(camera.fov, `${path}.fov`, 1, 179),
-    duration: projectNumber(camera.duration, `${path}.duration`, 0.01, 3600),
+    rotation: projectVec3(camera.rotation, `${path}.rotation`, VCAMERA_LIMITS.rotation.maximum),
+    fov: projectNumber(camera.fov, `${path}.fov`, VCAMERA_LIMITS.fov.minimum, VCAMERA_LIMITS.fov.maximum),
+    focusDistance: camera.focusDistance === undefined
+      ? VCAMERA_DEFAULTS.camera.focusDistance
+      : projectNumber(camera.focusDistance, `${path}.focusDistance`, VCAMERA_LIMITS.focusDistance.minimum, VCAMERA_LIMITS.focusDistance.maximum),
+    duration: projectNumber(camera.duration, `${path}.duration`, VCAMERA_LIMITS.positiveSceneTime.minimum, VCAMERA_LIMITS.positiveSceneTime.maximum),
     pathPoints,
     movementMode,
     aimMode,
     trackingActorId: camera.trackingActorId == null ? null : projectText(camera.trackingActorId, `${path}.trackingActorId`),
+    ...(camera.lookAtPoint == null ? {} : { lookAtPoint: projectVec3(camera.lookAtPoint, `${path}.lookAtPoint`) }),
     trackingPoint,
     followOffset: camera.followOffset === undefined
-      ? [0, 1.6, 3]
+      ? [...VCAMERA_DEFAULTS.camera.followOffset] as Vec3
       : projectVec3(camera.followOffset, `${path}.followOffset`),
     followSpeed: camera.followSpeed === undefined
-      ? 6
-      : projectNumber(camera.followSpeed, `${path}.followSpeed`, 0.01, 100),
+      ? VCAMERA_DEFAULTS.camera.followSpeed
+      : projectNumber(camera.followSpeed, `${path}.followSpeed`, VCAMERA_LIMITS.followSpeed.minimum, VCAMERA_LIMITS.followSpeed.maximum),
     motionPreset,
   };
 }
@@ -238,76 +272,60 @@ export function parsePathPoints(value: string | undefined): PathPoint[] {
       : parseVec3(String(item.position ?? ""), `point ${index + 1} position`);
     const time = Number(item.time);
     const yaw = item.yaw === undefined ? undefined : Number(item.yaw);
-    if (!Number.isFinite(time) || time < 0) throw new Error(`Path point ${index + 1} has an invalid time`);
-    if (yaw !== undefined && !Number.isFinite(yaw)) throw new Error(`Path point ${index + 1} has an invalid yaw`);
+    if (!Number.isFinite(time) || time < VCAMERA_LIMITS.sceneTime.minimum || time > VCAMERA_LIMITS.sceneTime.maximum) {
+      throw new Error(`Path point ${index + 1} time must be between ${VCAMERA_LIMITS.sceneTime.minimum} and ${VCAMERA_LIMITS.sceneTime.maximum}`);
+    }
+    if (yaw !== undefined && (
+      !Number.isFinite(yaw)
+      || yaw < VCAMERA_LIMITS.rotation.minimum
+      || yaw > VCAMERA_LIMITS.rotation.maximum
+    )) {
+      throw new Error(`Path point ${index + 1} yaw must be between ${VCAMERA_LIMITS.rotation.minimum} and ${VCAMERA_LIMITS.rotation.maximum}`);
+    }
+    const easing = item.easing === undefined ? undefined : parseEasing(item.easing, `Path point ${index + 1} easing`);
     return {
       id: typeof item.id === "string" && item.id.trim() ? item.id : `path_${randomUUID()}`,
       time,
       position: position as Vec3,
       ...(yaw !== undefined ? { yaw } : {}),
+      ...(easing !== undefined ? { easing } : {}),
     };
   }).sort((a, b) => a.time - b.time);
 }
 
-export function createMotionPresetPatch(input: {
-  preset: CameraMotionPreset;
-  camera: Camera;
-  actor: Actor;
-  duration?: number;
-}): Partial<Camera> {
-  const { preset, camera, actor } = input;
-  const duration = clamp(input.duration ?? camera.duration, 0.5, 120);
-  const actorPosition = actor.position;
-  const actorYaw = actor.rotation[1];
-  const startPosition = [...camera.position] as Vec3;
-  const basePatch: Partial<Camera> = {
-    duration: round(duration),
-    trackingActorId: actor.id,
-    trackingPoint: camera.trackingPoint,
-    aimMode: "actor",
-    motionPreset: preset,
-  };
-
-  if (preset === "fixed_tracking") return { ...basePatch, movementMode: "static", pathPoints: [] };
-
-  if (preset === "lead_follow" || preset === "chase_follow") {
-    const localOffset = worldOffsetToActorLocal([
-      startPosition[0] - actorPosition[0],
-      startPosition[1] - actorPosition[1],
-      startPosition[2] - actorPosition[2],
-    ], actorYaw);
-    const distance = clamp(Math.hypot(localOffset[0], localOffset[2]), 1.5, 12);
+export function parseCameraPathPoints(value: string | undefined): CameraPathPoint[] {
+  if (!value) throw new Error("--points-json is required");
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed)) throw new Error("--points-json must be a JSON array");
+  return parsed.map((item, index) => {
+    if (!isRecord(item)) throw new Error(`Camera path point ${index + 1} must be an object`);
+    const base = parsePathPoints(JSON.stringify([item]))[0];
+    const rotation = item.rotation === undefined
+      ? undefined
+      : parseVec3(Array.isArray(item.rotation) ? item.rotation.join(",") : String(item.rotation), `point ${index + 1} rotation`);
+    const fov = optionalJsonNumber(item.fov, `Camera path point ${index + 1} fov`, VCAMERA_LIMITS.fov.minimum, VCAMERA_LIMITS.fov.maximum);
+    const focusDistance = optionalJsonNumber(item.focusDistance, `Camera path point ${index + 1} focusDistance`, VCAMERA_LIMITS.focusDistance.minimum, VCAMERA_LIMITS.focusDistance.maximum);
     return {
-      ...basePatch,
-      movementMode: "follow",
-      pathPoints: [],
-      followOffset: [round(localOffset[0]), round(localOffset[1]), preset === "lead_follow" ? -distance : distance],
+      ...base,
+      ...(rotation ? { rotation } : {}),
+      ...(fov !== undefined ? { fov } : {}),
+      ...(focusDistance !== undefined ? { focusDistance } : {}),
     };
-  }
+  }).sort((a, b) => a.time - b.time);
+}
 
-  if (preset === "orbit_left" || preset === "orbit_right") {
-    return {
-      ...basePatch,
-      movementMode: "path",
-      pathPoints: createOrbitPoints(startPosition, actorPosition, duration, preset === "orbit_left" ? -1 : 1),
-    };
+export function getProjectSceneEnd(project: Pick<VCameraProject, "actors" | "cubes" | "cameras" | "cameraCuts" | "shots">): number {
+  const times = [...project.cameraCuts.map((cut) => cut.time), ...project.shots.map((shot) => shot.endTime)];
+  for (const actor of project.actors) {
+    times.push(...actor.pathPoints.map((point) => point.time));
+    times.push(...(actor.actionMarkers ?? []).map((marker) => marker.time));
   }
-
-  const basis = getViewBasis(startPosition, actorPosition);
-  let endPosition = startPosition;
-  if (preset === "push_in") {
-    endPosition = addScaled(startPosition, basis.forward, Math.max(0.6, basis.distance * 0.45));
-  } else if (preset === "pull_out") {
-    endPosition = addScaled(startPosition, basis.forward, -Math.max(1.2, basis.distance * 0.65));
-  } else if (preset === "truck_left" || preset === "truck_right") {
-    const amount = clamp(basis.distance * 0.75, 1.5, 6);
-    endPosition = addScaled(startPosition, basis.right, preset === "truck_left" ? -amount : amount);
+  for (const prop of project.cubes) {
+    times.push(...prop.pathPoints.map((point) => point.time));
+    times.push(...(prop.visibilityKeyframes ?? []).map((point) => point.time));
   }
-  return {
-    ...basePatch,
-    movementMode: "path",
-    pathPoints: [pathPoint(0, startPosition), pathPoint(duration, endPosition)],
-  };
+  for (const camera of project.cameras) times.push(...camera.pathPoints.map((point) => point.time));
+  return Math.max(1, ...times.filter(Number.isFinite));
 }
 
 export function cameraOffsetInActorSpace(camera: Camera, actor: Actor): Vec3 {
@@ -330,48 +348,6 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function pathPoint(time: number, position: Vec3): PathPoint {
-  return { id: `camera_path_${randomUUID()}`, time: round(time), position: position.map(round) as Vec3 };
-}
-
-function createOrbitPoints(camera: Vec3, target: Vec3, duration: number, direction: -1 | 1): PathPoint[] {
-  const offsetX = camera[0] - target[0];
-  const offsetZ = camera[2] - target[2];
-  const radius = clamp(Math.hypot(offsetX, offsetZ), 1.5, 12);
-  const startAngle = Math.atan2(offsetZ, offsetX);
-  return Array.from({ length: 7 }, (_, index) => {
-    const amount = index / 6;
-    const angle = startAngle + direction * Math.PI * amount;
-    return pathPoint(duration * amount, [
-      target[0] + Math.cos(angle) * radius,
-      camera[1],
-      target[2] + Math.sin(angle) * radius,
-    ]);
-  });
-}
-
-function getViewBasis(camera: Vec3, target: Vec3) {
-  let x = target[0] - camera[0];
-  let z = target[2] - camera[2];
-  let distance = Math.hypot(x, z);
-  if (distance < 0.2) {
-    x = 0;
-    z = -1;
-    distance = 1;
-  }
-  const forward: Vec3 = [x / distance, 0, z / distance];
-  const right: Vec3 = [-forward[2], 0, forward[0]];
-  return { distance, forward, right };
-}
-
-function addScaled(position: Vec3, direction: Vec3, amount: number): Vec3 {
-  return [
-    round(position[0] + direction[0] * amount),
-    round(position[1] + direction[1] * amount),
-    round(position[2] + direction[2] * amount),
-  ];
-}
-
 function worldOffsetToActorLocal(offset: Vec3, yawDegrees: number): Vec3 {
   const yaw = (-yawDegrees * Math.PI) / 180;
   const cosine = Math.cos(yaw);
@@ -384,7 +360,9 @@ function worldOffsetToActorLocal(offset: Vec3, yawDegrees: number): Vec3 {
 }
 
 function normalizeActor(value: unknown, path: string): Actor {
-  const actor = projectRecord(value, path, ["id", "name", "position", "rotation", "height", "pathPoints"]);
+  const actor = projectRecord(value, path, [
+    "id", "name", "position", "rotation", "height", "lookAtActorId", "lookAtPoint", "actionMarkers", "pathPoints",
+  ]);
   const pathPoints = normalizePathPoints(actor.pathPoints, `${path}.pathPoints`);
   const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
   const position = projectVec3(actor.position, `${path}.position`);
@@ -392,8 +370,20 @@ function normalizeActor(value: unknown, path: string): Actor {
     id: projectText(actor.id, `${path}.id`),
     name: projectText(actor.name, `${path}.name`),
     position: zeroPoint ? [...zeroPoint.position] : position,
-    rotation: projectVec3(actor.rotation, `${path}.rotation`, 36000),
-    height: projectNumber(actor.height, `${path}.height`, 0.1, 20),
+    rotation: projectVec3(actor.rotation, `${path}.rotation`, VCAMERA_LIMITS.rotation.maximum),
+    height: projectNumber(actor.height, `${path}.height`, VCAMERA_LIMITS.actorHeight.minimum, VCAMERA_LIMITS.actorHeight.maximum),
+    ...(actor.lookAtActorId == null ? {} : { lookAtActorId: projectText(actor.lookAtActorId, `${path}.lookAtActorId`) }),
+    ...(actor.lookAtPoint == null ? {} : { lookAtPoint: projectVec3(actor.lookAtPoint, `${path}.lookAtPoint`) }),
+    actionMarkers: normalizeCollection(actor.actionMarkers, `${path}.actionMarkers`, VCAMERA_LIMITS.collections.actionMarkersPerActor, (item, itemPath) => {
+      const marker = projectRecord(item, itemPath, ["id", "time", "action", "targetActorId", "targetPoint"]);
+      return {
+        id: projectText(marker.id, `${itemPath}.id`),
+        time: projectNumber(marker.time, `${itemPath}.time`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum),
+        action: projectText(marker.action, `${itemPath}.action`),
+        ...(marker.targetActorId == null ? {} : { targetActorId: projectText(marker.targetActorId, `${itemPath}.targetActorId`) }),
+        ...(marker.targetPoint == null ? {} : { targetPoint: projectVec3(marker.targetPoint, `${itemPath}.targetPoint`) }),
+      };
+    }).sort((a, b) => a.time - b.time),
     pathPoints,
   };
 }
@@ -401,7 +391,7 @@ function normalizeActor(value: unknown, path: string): Actor {
 function normalizeProp(value: unknown, path: string): Prop {
   const prop = projectRecord(value, path, [
     "id", "name", "position", "rotation", "scale", "visible", "locked",
-    "propPreset", "stepCount", "pathPoints",
+    "propPreset", "stepCount", "sourceType", "assetId", "visibilityKeyframes", "pathPoints",
   ]);
   const pathPoints = normalizePathPoints(prop.pathPoints, `${path}.pathPoints`);
   const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
@@ -411,23 +401,35 @@ function normalizeProp(value: unknown, path: string): Prop {
     : projectChoice(prop.propPreset, `${path}.propPreset`, PROP_PRESETS);
   const stepCount = prop.stepCount == null
     ? undefined
-    : projectInteger(prop.stepCount, `${path}.stepCount`, 2, 64);
+    : projectInteger(prop.stepCount, `${path}.stepCount`, VCAMERA_LIMITS.stepCount.minimum, VCAMERA_LIMITS.stepCount.maximum);
   return {
     id: projectText(prop.id, `${path}.id`),
     name: projectText(prop.name, `${path}.name`),
     position: zeroPoint ? [...zeroPoint.position] : position,
-    rotation: projectVec3(prop.rotation, `${path}.rotation`, 36000),
-    scale: projectVec3(prop.scale, `${path}.scale`, 1_000_000, 0.001),
+    rotation: projectVec3(prop.rotation, `${path}.rotation`, VCAMERA_LIMITS.rotation.maximum),
+    scale: projectVec3(prop.scale, `${path}.scale`, VCAMERA_LIMITS.scale.maximum, VCAMERA_LIMITS.scale.minimum),
     visible: prop.visible === undefined ? true : projectBoolean(prop.visible, `${path}.visible`),
     locked: prop.locked === undefined ? false : projectBoolean(prop.locked, `${path}.locked`),
     ...(propPreset !== undefined ? { propPreset } : {}),
     ...(stepCount !== undefined ? { stepCount } : {}),
+    sourceType: prop.sourceType === undefined
+      ? "primitive"
+      : projectChoice(prop.sourceType, `${path}.sourceType`, ["primitive", "asset"] as const),
+    ...(prop.assetId == null ? {} : { assetId: projectText(prop.assetId, `${path}.assetId`) }),
+    visibilityKeyframes: normalizeCollection(prop.visibilityKeyframes, `${path}.visibilityKeyframes`, VCAMERA_LIMITS.collections.visibilityKeyframesPerProp, (item, itemPath) => {
+      const keyframe = projectRecord(item, itemPath, ["id", "time", "visible"]);
+      return {
+        id: projectText(keyframe.id, `${itemPath}.id`),
+        time: projectNumber(keyframe.time, `${itemPath}.time`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum),
+        visible: projectBoolean(keyframe.visible, `${itemPath}.visible`),
+      };
+    }).sort((a, b) => a.time - b.time),
     pathPoints,
   };
 }
 
 function normalizeCameraCut(value: unknown, path: string): CameraCut {
-  const cut = projectRecord(value, path, ["id", "time", "cameraId", "anchor"]);
+  const cut = projectRecord(value, path, ["id", "time", "cameraId", "shotId", "anchor"]);
   const anchorValue = cut.anchor;
   let anchor: CameraCut["anchor"];
   if (anchorValue != null) {
@@ -441,24 +443,59 @@ function normalizeCameraCut(value: unknown, path: string): CameraCut {
   }
   return {
     id: projectText(cut.id, `${path}.id`),
-    time: projectNumber(cut.time, `${path}.time`, 0, 3600),
+    time: projectNumber(cut.time, `${path}.time`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum),
     cameraId: projectText(cut.cameraId, `${path}.cameraId`),
+    ...(cut.shotId == null ? {} : { shotId: projectText(cut.shotId, `${path}.shotId`) }),
     ...(anchor ? { anchor } : {}),
   };
 }
 
+function normalizeCameraShot(value: unknown, path: string): CameraShot {
+  const shot = projectRecord(value, path, ["id", "name", "startTime", "endTime", "cameraId", "locked", "metadata"]);
+  const startTime = projectNumber(shot.startTime, `${path}.startTime`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum);
+  const endTime = projectNumber(shot.endTime, `${path}.endTime`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum);
+  if (endTime <= startTime) invalidProject(`${path}.endTime`, "must be greater than startTime");
+  const metadata = shot.metadata == null ? undefined : projectRecord(shot.metadata, `${path}.metadata`);
+  return {
+    id: projectText(shot.id, `${path}.id`),
+    name: projectText(shot.name, `${path}.name`),
+    startTime,
+    endTime,
+    cameraId: projectText(shot.cameraId, `${path}.cameraId`),
+    locked: shot.locked === undefined ? false : projectBoolean(shot.locked, `${path}.locked`),
+    ...(metadata ? { metadata: metadata as CameraShot["metadata"] } : {}),
+  };
+}
+
 function normalizePathPoints(value: unknown, path: string): PathPoint[] {
-  return normalizeCollection(value, path, 2000, (item, itemPath) => {
-    const point = projectRecord(item, itemPath, ["id", "time", "position", "yaw"]);
+  return normalizeCollection(value, path, VCAMERA_LIMITS.collections.pathPointsPerEntity, (item, itemPath) => {
+    const point = projectRecord(item, itemPath, ["id", "time", "position", "yaw", "easing"]);
     return {
       id: projectText(point.id, `${itemPath}.id`),
-      time: projectNumber(point.time, `${itemPath}.time`, 0, 3600),
+      time: projectNumber(point.time, `${itemPath}.time`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum),
       position: projectVec3(point.position, `${itemPath}.position`),
       ...(point.yaw == null
         ? {}
-        : { yaw: projectNumber(point.yaw, `${itemPath}.yaw`, -36000, 36000) }),
+        : { yaw: projectNumber(point.yaw, `${itemPath}.yaw`, VCAMERA_LIMITS.rotation.minimum, VCAMERA_LIMITS.rotation.maximum) }),
+      ...(point.easing == null ? {} : { easing: projectChoice(point.easing, `${itemPath}.easing`, SCENE_EASINGS) }),
     };
-  });
+  }).sort((a, b) => a.time - b.time);
+}
+
+function normalizeCameraPathPoints(value: unknown, path: string): CameraPathPoint[] {
+  return normalizeCollection(value, path, VCAMERA_LIMITS.collections.pathPointsPerEntity, (item, itemPath) => {
+    const point = projectRecord(item, itemPath, ["id", "time", "position", "yaw", "easing", "rotation", "fov", "focusDistance"]);
+    return {
+      id: projectText(point.id, `${itemPath}.id`),
+      time: projectNumber(point.time, `${itemPath}.time`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum),
+      position: projectVec3(point.position, `${itemPath}.position`),
+      ...(point.yaw == null ? {} : { yaw: projectNumber(point.yaw, `${itemPath}.yaw`, VCAMERA_LIMITS.rotation.minimum, VCAMERA_LIMITS.rotation.maximum) }),
+      ...(point.easing == null ? {} : { easing: projectChoice(point.easing, `${itemPath}.easing`, SCENE_EASINGS) }),
+      ...(point.rotation == null ? {} : { rotation: projectVec3(point.rotation, `${itemPath}.rotation`, VCAMERA_LIMITS.rotation.maximum) }),
+      ...(point.fov == null ? {} : { fov: projectNumber(point.fov, `${itemPath}.fov`, VCAMERA_LIMITS.fov.minimum, VCAMERA_LIMITS.fov.maximum) }),
+      ...(point.focusDistance == null ? {} : { focusDistance: projectNumber(point.focusDistance, `${itemPath}.focusDistance`, VCAMERA_LIMITS.focusDistance.minimum, VCAMERA_LIMITS.focusDistance.maximum) }),
+    };
+  }).sort((a, b) => a.time - b.time);
 }
 
 function normalizeCollection<T>(
@@ -479,6 +516,131 @@ function ensureUniqueProjectIds(items: Array<{ id: string; pathPoints?: PathPoin
     if (ids.has(item.id)) invalidProject(path, `contains duplicate id ${item.id}`);
     ids.add(item.id);
     if (item.pathPoints) ensureUniqueProjectIds(item.pathPoints, `${path}[${index}].pathPoints`);
+  }
+}
+
+function repairProjectReferences(project: VCameraProject): VCameraProject {
+  const actorIds = new Set(project.actors.map((actor) => actor.id));
+  const actors = project.actors.map((actor) => ({
+    ...actor,
+    lookAtActorId:
+      actor.lookAtActorId && actor.lookAtActorId !== actor.id && actorIds.has(actor.lookAtActorId)
+        ? actor.lookAtActorId
+        : null,
+    actionMarkers: (actor.actionMarkers ?? []).map((marker) => {
+      if (!marker.targetActorId || (marker.targetActorId !== actor.id && actorIds.has(marker.targetActorId))) {
+        return marker;
+      }
+      const { targetActorId: _staleTargetActorId, ...safeMarker } = marker;
+      return safeMarker;
+    }),
+  }));
+  const cameras = project.cameras.map((camera) => {
+    const hasTrackingActor = Boolean(camera.trackingActorId && actorIds.has(camera.trackingActorId));
+    if (hasTrackingActor && (camera.aimMode !== "point" || camera.lookAtPoint)) return camera;
+    return {
+      ...camera,
+      trackingActorId: hasTrackingActor ? camera.trackingActorId : null,
+      movementMode: !hasTrackingActor && camera.movementMode === "follow" ? "static" as const : camera.movementMode,
+      aimMode:
+        (!hasTrackingActor && camera.aimMode === "actor") || (camera.aimMode === "point" && !camera.lookAtPoint)
+          ? "manual" as const
+          : camera.aimMode,
+    };
+  });
+  const cameraIds = new Set(cameras.map((camera) => camera.id));
+  const shots = project.shots.filter((shot) => cameraIds.has(shot.cameraId));
+  const shotIds = new Set(shots.map((shot) => shot.id));
+  const shotStartTimes = shots.map((shot) => shot.startTime);
+  const actorPointIds = new Map(actors.map((actor) => [
+    actor.id,
+    new Set(actor.pathPoints.map((point) => point.id)),
+  ]));
+  const linkedCuts = new Map(
+    project.cameraCuts
+      .filter((cut) => cut.shotId && shotIds.has(cut.shotId))
+      .map((cut) => [cut.shotId as string, cut]),
+  );
+  const independentCuts = project.cameraCuts.flatMap((cut): CameraCut[] => {
+    if (!cameraIds.has(cut.cameraId) || (cut.shotId && shotIds.has(cut.shotId))) return [];
+    if (shotStartTimes.some((time) => Math.abs(time - cut.time) <= 0.001)) return [];
+    if (cut.anchor && !actorPointIds.get(cut.anchor.actorId)?.has(cut.anchor.pointId)) return [];
+    const { shotId: _shotId, ...independentCut } = cut;
+    return [independentCut];
+  });
+  const shotCuts = shots.map((shot) => ({
+    id: linkedCuts.get(shot.id)?.id ?? `camera_cut_${shot.id}`,
+    time: shot.startTime,
+    cameraId: shot.cameraId,
+    shotId: shot.id,
+  }));
+  return {
+    ...project,
+    actors,
+    cameras,
+    shots,
+    cameraCuts: [...independentCuts, ...shotCuts].sort((a, b) => a.time - b.time || a.id.localeCompare(b.id)),
+    activeCameraId: project.activeCameraId && cameraIds.has(project.activeCameraId)
+      ? project.activeCameraId
+      : cameras[0]?.id ?? null,
+  };
+}
+
+function validateProjectReferences(project: VCameraProject): void {
+  const actorIds = new Set(project.actors.map((actor) => actor.id));
+  const cameraIds = new Set(project.cameras.map((camera) => camera.id));
+  const shotIds = new Set(project.shots.map((shot) => shot.id));
+  if (project.activeCameraId && !cameraIds.has(project.activeCameraId)) {
+    invalidProject("activeCameraId", `references missing camera ${project.activeCameraId}`);
+  }
+  for (const actor of project.actors) {
+    if (actor.lookAtActorId && !actorIds.has(actor.lookAtActorId)) {
+      invalidProject(`actors.${actor.id}.lookAtActorId`, `references missing actor ${actor.lookAtActorId}`);
+    }
+    if (actor.lookAtActorId === actor.id) {
+      invalidProject(`actors.${actor.id}.lookAtActorId`, "cannot reference the same actor");
+    }
+    const markerIds = new Set<string>();
+    for (const marker of actor.actionMarkers ?? []) {
+      if (markerIds.has(marker.id)) invalidProject(`actors.${actor.id}.actionMarkers`, `contains duplicate id ${marker.id}`);
+      markerIds.add(marker.id);
+      if (marker.targetActorId && !actorIds.has(marker.targetActorId)) {
+        invalidProject(`actors.${actor.id}.actionMarkers.${marker.id}`, `references missing actor ${marker.targetActorId}`);
+      }
+    }
+  }
+  for (const camera of project.cameras) {
+    if (camera.trackingActorId && !actorIds.has(camera.trackingActorId)) {
+      invalidProject(`cameras.${camera.id}.trackingActorId`, `references missing actor ${camera.trackingActorId}`);
+    }
+    if (camera.movementMode === "follow" && !camera.trackingActorId) {
+      invalidProject(`cameras.${camera.id}.trackingActorId`, "is required for follow movement");
+    }
+    if (camera.aimMode === "actor" && !camera.trackingActorId) {
+      invalidProject(`cameras.${camera.id}.trackingActorId`, "is required when aiming at an actor");
+    }
+    if (camera.aimMode === "point" && !camera.lookAtPoint) {
+      invalidProject(`cameras.${camera.id}.lookAtPoint`, "is required when aiming at a fixed point");
+    }
+  }
+  for (const shot of project.shots) {
+    if (!cameraIds.has(shot.cameraId)) invalidProject(`shots.${shot.id}.cameraId`, `references missing camera ${shot.cameraId}`);
+  }
+  for (let index = 1; index < project.shots.length; index += 1) {
+    if (project.shots[index].startTime < project.shots[index - 1].endTime) {
+      invalidProject(`shots.${project.shots[index].id}`, `overlaps shot ${project.shots[index - 1].id}`);
+    }
+  }
+  for (const cut of project.cameraCuts) {
+    if (!cameraIds.has(cut.cameraId)) invalidProject(`cameraCuts.${cut.id}.cameraId`, `references missing camera ${cut.cameraId}`);
+    if (cut.shotId && !shotIds.has(cut.shotId)) invalidProject(`cameraCuts.${cut.id}.shotId`, `references missing shot ${cut.shotId}`);
+    if (cut.anchor) {
+      const actor = project.actors.find((item) => item.id === cut.anchor?.actorId);
+      if (!actor) invalidProject(`cameraCuts.${cut.id}.anchor.actorId`, `references missing actor ${cut.anchor.actorId}`);
+      if (!actor.pathPoints.some((point) => point.id === cut.anchor?.pointId)) {
+        invalidProject(`cameraCuts.${cut.id}.anchor.pointId`, `references missing path point ${cut.anchor.pointId}`);
+      }
+    }
   }
 }
 
@@ -542,14 +704,26 @@ function normalizeSafeFrame(value: unknown): SafeFrameRatio {
   return projectChoice(value, "safeFrameRatio", ["off", "9:16", "16:9", "1:1"] as const);
 }
 
+function parseEasing(value: unknown, label: string): SceneEasing {
+  if (typeof value !== "string" || !(SCENE_EASINGS as readonly string[]).includes(value)) {
+    throw new Error(`${label} must be one of ${SCENE_EASINGS.join(", ")}`);
+  }
+  return value as SceneEasing;
+}
+
+function optionalJsonNumber(value: unknown, label: string, minimum: number, maximum: number): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${label} must be between ${minimum} and ${maximum}`);
+  }
+  return parsed;
+}
+
 function invalidProject(path: string, message: string): never {
   throw new Error(`Invalid V-camera project data: ${path} ${message}`);
 }
 
 function round(value: number): number {
   return Number(value.toFixed(3));
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(maximum, Math.max(minimum, value));
 }

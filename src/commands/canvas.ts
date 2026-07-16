@@ -9,9 +9,14 @@ import { loadRuntimeConfig } from "../core/config.js";
 import { openUrl } from "../core/open.js";
 import { json, text } from "../core/output.js";
 import { handleVCameraCommand, vCameraUsage } from "./v-camera.js";
+import { getVCameraCapabilities } from "../v-camera/contract.js";
 
 export async function handleCanvasCommand(subcommand = "", args: string[]): Promise<void> {
   const asJson = hasFlag(args, "--json");
+  if (subcommand === "v-camera" && args[0] === "capabilities") {
+    json(getVCameraCapabilities());
+    return;
+  }
   const config = await loadRuntimeConfig();
   const api = new ApiClient({ baseUrl: config.apiBase, token: config.token });
 

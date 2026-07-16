@@ -34,11 +34,14 @@ Usage:
   mir-cli canvas node disconnect --canvas-id <canvas_id> --from-node <asset_node_id> --to-node <generation_node_id> --yes --json
   mir-cli canvas node add-image --canvas-id <canvas_id> --prompt "Prompt" --model <model_id> --yes --open --json
   mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <image_url> --connect-to <node_id> --yes --json
+  mir-cli canvas v-camera capabilities --json
   mir-cli canvas v-camera create --canvas-id <canvas_id> --yes --json
   mir-cli canvas v-camera inspect --canvas-id <canvas_id> --json
   mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "Hero" --position "0,0,0" --yes --json
   mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "Hero" --time 2.125 --position "2,0,4" --yes --json
-  mir-cli canvas v-camera camera preset --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --preset orbit_left --duration 8 --yes --json
+  mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "Camera A" --movement-mode path --aim-mode actor --tracking-actor "Hero" --motion-preset orbit_left --yes --json
+  mir-cli canvas v-camera camera path set --canvas-id <canvas_id> --camera "Camera A" --points-json '[{"time":8,"position":[0,1.6,6]},{"time":13,"position":[2,1.6,3],"fov":52}]' --yes --json
+  mir-cli canvas v-camera shot add --canvas-id <canvas_id> --name "S02 Push in" --camera "Camera A" --start-time 8 --duration 5 --yes --json
   mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera A" --time 4.5 --yes --json
   mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
 

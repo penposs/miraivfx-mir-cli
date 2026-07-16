@@ -27,16 +27,27 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 13. Use `mir-cli canvas node delete --node-id <node_id> --yes` only for exact user-confirmed node ids.
 14. Open the canvas for the user to review and run generation in Miraivfx.
 
-## Virtual Shoot Flow
+## Virtual Shoot Parameter Contract
 
-1. Inspect with `mir-cli canvas v-camera inspect --canvas-id <canvas_id> --json`. If multiple nodes are returned, identify the exact `--node-id` before changing anything.
-2. Prefer named domain commands over generic `node update --data-json`: `project`, `actor`, `prop`, `camera`, and `cut`.
-3. Use `--dry-run` first for multi-entity paths, tracking setups, motion presets, and camera-cut schedules.
-4. Use `position` and `rotation` values in `x,y,z` form. Path times are seconds and may use millisecond precision.
-5. Use actor/prop/camera `path add`, `path set`, `path delete`, and `path clear` for timed movement.
-6. Use `camera follow` for continuous tracking and `camera preset` for push, pull, truck, fixed tracking, lead/chase follow, or orbit shots.
-7. Use `cut add --time` for timeline switching. For actor-path switching, pass both `--actor` and `--point`; the CLI derives the cut time from that point.
-8. Never use generic node data updates to change `vCameraProject`; the dedicated endpoint preserves takes and rejects stale canvas revisions.
+1. Read the offline contract first with `mir-cli canvas v-camera capabilities --json`. Do not hard-code fields, ranges, defaults, protected fields, or helper side effects in the Skill.
+2. Inspect with `mir-cli canvas v-camera inspect --canvas-id <canvas_id> --json`. If multiple nodes are returned, identify the exact `--node-id` before changing anything.
+3. Use raw domain commands instead of generic `node update --data-json`: `project`, `actor`, `prop`, `camera`, `shot`, and `cut`.
+4. Use `--dry-run` before every mutation. Verify the exact patch and side effects, then repeat with `--yes`. Inspect again after writing.
+5. MIR Virtual Shoot uses one global scene timeline; every path point, marker, keyframe, shot boundary, and camera cut time is an absolute scene time from project second `0`. Times may use millisecond precision.
+6. Use actor/prop/camera `path add`, `path set`, `path update`, `path delete`, and `path clear` for exact timed movement.
+7. Retain the stable entity ID returned by every create command. Names are editable and may repeat; use a name only when it is unambiguous.
+8. Raw `set` changes only explicit fields. It never translates a path. Use `translate --delta x,y,z` only when the base and all path points must move together. Use `--sync-origin` only when intentionally synchronizing a zero-time path point.
+9. Use `shot add/set/delete` for the planned shot sequence. A shot synchronizes its camera cut at `shot.startTime`; main-timeline shots must not overlap.
+10. Supply staging, camera placement, shot order, movement curves, tracking targets, and easing explicitly through raw fields and keyframes.
+11. Use raw `camera set` to map movement mode, aim mode, tracking actor, tracking point, follow offset, follow speed, look-at point, and motion-preset metadata. Automated systems must not use the compound `camera follow` or `camera aim` helpers.
+12. `motionPreset` is metadata only. Never invoke `camera preset` or derive camera keyframes from a preset name inside the CLI.
+13. Use `camera path set --points-json` or `camera path update` for exact position, rotation, field-of-view, focus-distance, and easing keyframes supplied by the caller. These times are already global and must never be converted to shot-local time.
+14. Use `actor action set`, `prop visibility set`, and `cut set --actor --point|--clear-anchor` to update stable child IDs instead of deleting and recreating them.
+15. Use `cut add --time` for timeline switching outside the shot sequence. For actor-path switching, pass both `--actor` and `--point`; the CLI derives the cut time from that point.
+16. Never use generic node data updates to change `vCameraProject`; the dedicated endpoint preserves takes and rejects stale canvas revisions.
+17. Scene duration is derived from the latest authored actor, prop, camera, marker, keyframe, shot, or cut time. Use shots to represent deliberate static hold time.
+18. The caller may combine scene fields freely within the server contract. Enforce only the rules declared by capabilities; do not invent director constraints.
+19. Read `docs/COMMANDS.md#virtual-shoot-parameter-reference` for human-readable examples, while treating capabilities as the machine authority.
 
 ## Direct Field Mapping
 
