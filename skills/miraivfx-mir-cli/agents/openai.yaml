@@ -1,0 +1,7 @@
+interface:
+  display_name: "Miraivfx MIR CLI"
+  short_description: "Guide and operate all Miraivfx canvas node workflows"
+  default_prompt: "Use $miraivfx-mir-cli to inspect my canvas, discover supported node capabilities, and safely perform the requested operation."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,3 +1,8 @@
+---
+name: miraivfx-mir-cli
+description: Guide and operate Miraivfx through mir-cli across authentication, projects, canvases, canvas-node capability discovery, uploads, models, layout, node creation, connection, update, deletion, and specialized node command groups. Use when Codex needs to learn what a Miraivfx canvas or node supports, inspect current state, or safely translate user intent into supported canvas operations.
+---
+
 # Miraivfx MIR CLI Skill
 
 Use this skill when the user asks an agent to operate Miraivfx projects, canvases, canvas nodes, model discovery, uploads, or safe canvas setup through `mir-cli`.
