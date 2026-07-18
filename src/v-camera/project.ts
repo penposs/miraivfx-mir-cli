@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 import {
   VCAMERA_DEFAULTS,
   VCAMERA_ENUMS,
+  VCAMERA_FIELDS,
   VCAMERA_LIMITS,
+  VCAMERA_PROJECT_VERSION,
 } from "./contract.js";
+import { createNeutralActorPose } from "./actor-pose.js";
 
 export type Vec3 = [number, number, number];
 export type SafeFrameRatio = "off" | "9:16" | "16:9" | "1:1";
@@ -14,6 +17,28 @@ export type CameraAimMode = "manual" | "actor" | "point";
 export type CameraTrackingPoint = "head" | "chest" | "center";
 export const CAMERA_MOTION_PRESETS = VCAMERA_ENUMS.cameraMotionPreset;
 export type CameraMotionPreset = typeof CAMERA_MOTION_PRESETS[number];
+export type ActorJointId = typeof VCAMERA_ENUMS.actorJointId[number];
+export type ActorPosePreset = typeof VCAMERA_ENUMS.actorPosePreset[number];
+
+export interface ActorPosePresetParameters {
+  seatHeight?: number;
+  intensity?: number;
+  mirror?: boolean;
+}
+
+export interface ActorPose {
+  rootOffset: Vec3;
+  jointRotations: Partial<Record<ActorJointId, Vec3>>;
+  sourcePreset?: ActorPosePreset | null;
+  presetParameters?: ActorPosePresetParameters;
+}
+
+export interface ActorPoseKeyframe {
+  id: string;
+  time: number;
+  pose: ActorPose;
+  easing?: SceneEasing;
+}
 
 export const PROP_PRESETS = VCAMERA_ENUMS.propPreset;
 export type PropPreset = typeof PROP_PRESETS[number];
@@ -56,6 +81,8 @@ export interface Actor {
     targetActorId?: string;
     targetPoint?: Vec3;
   }>;
+  pose: ActorPose;
+  poseKeyframes: ActorPoseKeyframe[];
   pathPoints: ActorPathPoint[];
 }
 
@@ -117,7 +144,7 @@ export interface CameraShot {
 }
 
 export interface VCameraProject extends Record<string, unknown> {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   name: string;
   fps: number;
   duration: number;
@@ -145,7 +172,7 @@ export const PROP_DEFAULTS: Record<PropPreset, { name: string; scale: Vec3 }> = 
 
 export function defaultVCameraProject(): VCameraProject {
   return {
-    version: 3,
+    version: VCAMERA_PROJECT_VERSION,
     name: VCAMERA_DEFAULTS.project.name,
     fps: VCAMERA_DEFAULTS.project.fps,
     duration: VCAMERA_DEFAULTS.project.duration,
@@ -164,28 +191,33 @@ export function defaultVCameraProject(): VCameraProject {
   };
 }
 
-export function normalizeProject(value: unknown): VCameraProject {
+type NormalizeProjectOptions = {
+  repairReferences?: boolean;
+};
+
+export function normalizeProject(value: unknown, options: NormalizeProjectOptions = {}): VCameraProject {
   const defaults = defaultVCameraProject();
   const source = isRecord(value) ? clone(value) : defaults;
   const sourceVersion = normalizeProjectVersion(source.version);
-  const legacySource = sourceVersion < 3;
+  const legacyPathSource = sourceVersion < 3;
+  const legacyPoseSource = sourceVersion < VCAMERA_PROJECT_VERSION;
   const cubes = normalizeCollection(
     source.cubes,
     "cubes",
     VCAMERA_LIMITS.collections.props,
-    (item, path) => normalizeProp(item, path, legacySource),
+    (item, path) => normalizeProp(item, path, legacyPathSource),
   );
   const actors = normalizeCollection(
     source.actors,
     "actors",
     VCAMERA_LIMITS.collections.actors,
-    (item, path) => normalizeActor(item, path, legacySource),
+    (item, path) => normalizeActor(item, path, legacyPathSource, legacyPoseSource),
   );
   const cameras = normalizeCollection(
     source.cameras,
     "cameras",
     VCAMERA_LIMITS.collections.cameras,
-    (item, path) => normalizeCameraAt(item, path, legacySource),
+    (item, path) => normalizeCameraAt(item, path, legacyPathSource),
   );
   const cameraCuts = normalizeCollection(source.cameraCuts, "cameraCuts", VCAMERA_LIMITS.collections.cameraCuts, normalizeCameraCut);
   const shots = normalizeCollection(source.shots, "shots", VCAMERA_LIMITS.collections.shots, normalizeCameraShot)
@@ -198,7 +230,7 @@ export function normalizeProject(value: unknown): VCameraProject {
   const project: VCameraProject = {
     ...defaults,
     ...source,
-    version: 3,
+    version: VCAMERA_PROJECT_VERSION,
     name: source.name === undefined ? defaults.name : projectText(source.name, "name"),
     fps: source.fps === undefined ? defaults.fps : projectNumber(source.fps, "fps", VCAMERA_LIMITS.fps.minimum, VCAMERA_LIMITS.fps.maximum),
     duration: source.duration === undefined ? defaults.duration : projectNumber(source.duration, "duration", VCAMERA_LIMITS.positiveSceneTime.minimum, VCAMERA_LIMITS.positiveSceneTime.maximum),
@@ -212,10 +244,58 @@ export function normalizeProject(value: unknown): VCameraProject {
     shots,
     activeCameraId: source.activeCameraId == null ? null : projectText(source.activeCameraId, "activeCameraId"),
   };
-  const repairedProject = repairProjectReferences(project);
-  validateProjectReferences(repairedProject);
-  repairedProject.duration = getProjectSceneEnd(repairedProject);
-  return repairedProject;
+  const normalizedProject = options.repairReferences === false ? project : repairProjectReferences(project);
+  validateProjectReferences(normalizedProject);
+  normalizedProject.duration = getProjectSceneEnd(normalizedProject);
+  return normalizedProject;
+}
+
+const COMPLETE_SCENE_FIELDS = [
+  "version",
+  "name",
+  "fps",
+  "duration",
+  "safeFrameRatio",
+  "cubes",
+  "actors",
+  "cameras",
+  "cameraCuts",
+  "shots",
+  "activeCameraId",
+] as const;
+
+export function normalizeCompleteSceneProject(value: unknown): VCameraProject {
+  if (!isRecord(value)) invalidProject("project", "must be an object");
+  if (value.version !== VCAMERA_PROJECT_VERSION) invalidProject("version", `must be the number ${VCAMERA_PROJECT_VERSION} for scene apply`);
+  for (const field of COMPLETE_SCENE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(value, field)) {
+      invalidProject(field, "is required for scene apply");
+    }
+  }
+  validateCompleteSceneRequiredFields(value);
+  const normalized = normalizeProject(value, { repairReferences: false });
+  const sourcePatch = Object.fromEntries(
+    COMPLETE_SCENE_FIELDS.map((field) => [field, clone(value[field])]),
+  );
+  assertSceneValuesPreserved(sourcePatch, getCompleteScenePatch(normalized), "project");
+  return normalized;
+}
+
+export function getCompleteScenePatch(project: VCameraProject): Pick<
+  VCameraProject,
+  typeof COMPLETE_SCENE_FIELDS[number]
+> {
+  return Object.fromEntries(
+    COMPLETE_SCENE_FIELDS.map((field) => [field, clone(project[field])]),
+  ) as Pick<VCameraProject, typeof COMPLETE_SCENE_FIELDS[number]>;
+}
+
+export function isSceneProjectEmpty(project: Pick<VCameraProject, "cubes" | "actors" | "cameras" | "cameraCuts" | "shots">): boolean {
+  return project.cubes.length === 0
+    && project.actors.length === 0
+    && project.cameras.length === 0
+    && project.cameraCuts.length === 0
+    && project.shots.length === 0;
 }
 
 export function normalizeCamera(value: unknown): Camera {
@@ -374,6 +454,7 @@ export function getProjectSceneEnd(project: Pick<VCameraProject, "actors" | "cub
   for (const actor of project.actors) {
     times.push(...actor.pathPoints.map((point) => point.time));
     times.push(...(actor.actionMarkers ?? []).map((marker) => marker.time));
+    times.push(...actor.poseKeyframes.map((frame) => frame.time));
   }
   for (const prop of project.cubes) {
     times.push(...prop.pathPoints.map((point) => point.time));
@@ -414,13 +495,16 @@ function worldOffsetToActorLocal(offset: Vec3, yawDegrees: number): Vec3 {
   ];
 }
 
-function normalizeActor(value: unknown, path: string, legacySource: boolean): Actor {
+function normalizeActor(value: unknown, path: string, legacyPathSource: boolean, legacyPoseSource: boolean): Actor {
   const actor = projectRecord(value, path, [
-    "id", "name", "position", "rotation", "height", "lookAtActorId", "lookAtPoint", "actionMarkers", "pathPoints",
+    "id", "name", "position", "rotation", "height", "lookAtActorId", "lookAtPoint", "actionMarkers", "pose", "poseKeyframes", "pathPoints",
   ]);
-  const pathPoints = normalizeActorPathPoints(actor.pathPoints, `${path}.pathPoints`, legacySource);
+  const pathPoints = normalizeActorPathPoints(actor.pathPoints, `${path}.pathPoints`, legacyPathSource);
   const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
   const position = projectVec3(actor.position, `${path}.position`);
+  if (!legacyPoseSource && actor.poseKeyframes === undefined) {
+    invalidProject(`${path}.poseKeyframes`, "is required for project version 4");
+  }
   return {
     id: projectText(actor.id, `${path}.id`),
     name: projectText(actor.name, `${path}.name`),
@@ -439,8 +523,54 @@ function normalizeActor(value: unknown, path: string, legacySource: boolean): Ac
         ...(marker.targetPoint == null ? {} : { targetPoint: projectVec3(marker.targetPoint, `${itemPath}.targetPoint`) }),
       };
     }).sort((a, b) => a.time - b.time),
+    pose: actor.pose == null && legacyPoseSource
+      ? createNeutralActorPose()
+      : normalizeActorPoseValue(actor.pose, `${path}.pose`),
+    poseKeyframes: normalizePoseKeyframes(actor.poseKeyframes, `${path}.poseKeyframes`),
     pathPoints,
   };
+}
+
+export function normalizeActorPoseValue(value: unknown, path = "pose"): ActorPose {
+  const pose = projectRecord(value, path, ["rootOffset", "jointRotations", "sourcePreset", "presetParameters"]);
+  if (!isRecord(pose.jointRotations)) invalidProject(`${path}.jointRotations`, "must be an object");
+  const jointRotations: Partial<Record<ActorJointId, Vec3>> = {};
+  for (const [jointId, rotation] of Object.entries(pose.jointRotations)) {
+    if (!(VCAMERA_ENUMS.actorJointId as readonly string[]).includes(jointId)) invalidProject(`${path}.jointRotations.${jointId}`, "is not a supported semantic joint");
+    jointRotations[jointId as ActorJointId] = projectVec3(rotation, `${path}.jointRotations.${jointId}`, VCAMERA_LIMITS.rotation.maximum);
+  }
+  let presetParameters: ActorPosePresetParameters | undefined;
+  if (pose.presetParameters != null) {
+    const parameters = projectRecord(pose.presetParameters, `${path}.presetParameters`, ["seatHeight", "intensity", "mirror"]);
+    presetParameters = {
+      ...(parameters.seatHeight == null ? {} : { seatHeight: projectNumber(parameters.seatHeight, `${path}.presetParameters.seatHeight`, VCAMERA_LIMITS.seatHeight.minimum, VCAMERA_LIMITS.seatHeight.maximum) }),
+      ...(parameters.intensity == null ? {} : { intensity: projectNumber(parameters.intensity, `${path}.presetParameters.intensity`, VCAMERA_LIMITS.poseIntensity.minimum, VCAMERA_LIMITS.poseIntensity.maximum) }),
+      ...(parameters.mirror == null ? {} : { mirror: projectBoolean(parameters.mirror, `${path}.presetParameters.mirror`) }),
+    };
+  }
+  return {
+    rootOffset: projectVec3(pose.rootOffset, `${path}.rootOffset`),
+    jointRotations,
+    sourcePreset: pose.sourcePreset == null
+      ? null
+      : projectChoice(pose.sourcePreset, `${path}.sourcePreset`, VCAMERA_ENUMS.actorPosePreset),
+    ...(presetParameters ? { presetParameters } : {}),
+  };
+}
+
+export function normalizePoseKeyframes(value: unknown, path = "poseKeyframes"): ActorPoseKeyframe[] {
+  const frames = normalizeCollection(value, path, VCAMERA_LIMITS.collections.poseKeyframesPerActor, (item, itemPath) => {
+    const frame = projectRecord(item, itemPath, ["id", "time", "pose", "easing"]);
+    return {
+      id: projectText(frame.id, `${itemPath}.id`),
+      time: projectNumber(frame.time, `${itemPath}.time`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum),
+      pose: normalizeActorPoseValue(frame.pose, `${itemPath}.pose`),
+      ...(frame.easing == null ? {} : { easing: projectChoice(frame.easing, `${itemPath}.easing`, SCENE_EASINGS) }),
+    };
+  }).sort((left, right) => left.time - right.time || left.id.localeCompare(right.id));
+  ensureUniqueProjectIds(frames, path);
+  ensureUniquePathTimes(frames.map((frame) => ({ ...frame, position: frame.pose.rootOffset })), path);
+  return frames;
 }
 
 function normalizeProp(value: unknown, path: string, legacySource: boolean): Prop {
@@ -510,7 +640,7 @@ function normalizeCameraShot(value: unknown, path: string): CameraShot {
   const startTime = projectNumber(shot.startTime, `${path}.startTime`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum);
   const endTime = projectNumber(shot.endTime, `${path}.endTime`, VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum);
   if (endTime <= startTime) invalidProject(`${path}.endTime`, "must be greater than startTime");
-  const metadata = shot.metadata == null ? undefined : projectRecord(shot.metadata, `${path}.metadata`);
+  const metadata = shot.metadata == null ? undefined : normalizeShotMetadata(shot.metadata, `${path}.metadata`);
   return {
     id: projectText(shot.id, `${path}.id`),
     name: projectText(shot.name, `${path}.name`),
@@ -520,6 +650,112 @@ function normalizeCameraShot(value: unknown, path: string): CameraShot {
     locked: shot.locked === undefined ? false : projectBoolean(shot.locked, `${path}.locked`),
     ...(metadata ? { metadata: metadata as CameraShot["metadata"] } : {}),
   };
+}
+
+type RequiredFieldContract = Record<string, { required?: boolean }>;
+
+function validateCompleteSceneRequiredFields(project: Record<string, unknown>): void {
+  validateRequiredCollection(project.cubes, "cubes", VCAMERA_FIELDS.prop, (item, path) => {
+    validateRequiredCollection(item.pathPoints, `${path}.pathPoints`, VCAMERA_FIELDS.propPathPoint);
+    if (item.visibilityKeyframes !== undefined) {
+      validateRequiredCollection(item.visibilityKeyframes, `${path}.visibilityKeyframes`, VCAMERA_FIELDS.visibilityKeyframe);
+    }
+  });
+  validateRequiredCollection(project.actors, "actors", VCAMERA_FIELDS.actor, (item, path) => {
+    validateRequiredCollection(item.pathPoints, `${path}.pathPoints`, VCAMERA_FIELDS.actorPathPoint);
+    validateActorPoseRequiredFields(item.pose, `${path}.pose`);
+    validateRequiredCollection(item.poseKeyframes, `${path}.poseKeyframes`, VCAMERA_FIELDS.actorPoseKeyframe, (frame, framePath) => {
+      validateActorPoseRequiredFields(frame.pose, `${framePath}.pose`);
+    });
+    if (item.actionMarkers !== undefined) {
+      validateRequiredCollection(item.actionMarkers, `${path}.actionMarkers`, VCAMERA_FIELDS.actionMarker);
+    }
+  });
+  validateRequiredCollection(project.cameras, "cameras", VCAMERA_FIELDS.camera, (item, path) => {
+    validateRequiredCollection(item.pathPoints, `${path}.pathPoints`, VCAMERA_FIELDS.cameraPathPoint);
+  });
+  validateRequiredCollection(project.cameraCuts, "cameraCuts", VCAMERA_FIELDS.cameraCut, (item, path) => {
+    if (item.anchor !== undefined && item.anchor !== null) {
+      validateRequiredFields(item.anchor, `${path}.anchor`, VCAMERA_FIELDS.cameraCutAnchor);
+    }
+  });
+  validateRequiredCollection(project.shots, "shots", VCAMERA_FIELDS.shot);
+}
+
+function validateActorPoseRequiredFields(value: unknown, path: string): void {
+  const pose = validateRequiredFields(value, path, VCAMERA_FIELDS.actorPose);
+  if (!isRecord(pose.jointRotations)) invalidProject(`${path}.jointRotations`, "must be an object");
+}
+
+function validateRequiredCollection(
+  value: unknown,
+  path: string,
+  fields: RequiredFieldContract,
+  validateItem?: (item: Record<string, unknown>, path: string) => void,
+): void {
+  if (!Array.isArray(value)) invalidProject(path, "must be an array");
+  value.forEach((item, index) => {
+    const itemPath = `${path}[${index}]`;
+    const record = validateRequiredFields(item, itemPath, fields);
+    validateItem?.(record, itemPath);
+  });
+}
+
+function validateRequiredFields(
+  value: unknown,
+  path: string,
+  fields: RequiredFieldContract,
+): Record<string, unknown> {
+  const record = projectRecord(value, path, Object.keys(fields));
+  for (const [field, contract] of Object.entries(fields)) {
+    if (contract.required && !Object.prototype.hasOwnProperty.call(record, field)) {
+      invalidProject(`${path}.${field}`, "is required for scene apply");
+    }
+  }
+  return record;
+}
+
+function assertSceneValuesPreserved(source: unknown, normalized: unknown, path: string): void {
+  if (Array.isArray(source)) {
+    if (!Array.isArray(normalized) || normalized.length !== source.length) {
+      invalidProject(path, "must not rely on implicit normalization for scene apply");
+    }
+    source.forEach((item, index) => assertSceneValuesPreserved(item, normalized[index], `${path}[${index}]`));
+    return;
+  }
+  if (isRecord(source)) {
+    if (!isRecord(normalized)) invalidProject(path, "must remain an object after validation");
+    for (const [key, item] of Object.entries(source)) {
+      if (!Object.prototype.hasOwnProperty.call(normalized, key)) {
+        if (item === null) continue;
+        invalidProject(`${path}.${key}`, "must not rely on implicit defaults for scene apply");
+      }
+      assertSceneValuesPreserved(item, normalized[key], `${path}.${key}`);
+    }
+    return;
+  }
+  if (!Object.is(source, normalized)) {
+    invalidProject(path, "must not be coerced, trimmed, reordered, or derived during scene apply");
+  }
+}
+
+function normalizeShotMetadata(value: unknown, path: string): CameraShot["metadata"] {
+  const metadata = projectRecord(value, path);
+  if (Object.keys(metadata).length > 50) invalidProject(path, "must contain at most 50 fields");
+  const result: NonNullable<CameraShot["metadata"]> = {};
+  for (const [key, item] of Object.entries(metadata)) {
+    if (!key.trim() || key.trim() !== key || key.length > 80) {
+      invalidProject(`${path}.${key || "key"}`, "key must be 1 to 80 non-whitespace-trimmed characters");
+    }
+    if (item === null || typeof item === "string" || typeof item === "boolean") {
+      result[key] = item;
+    } else if (typeof item === "number" && Number.isFinite(item)) {
+      result[key] = item;
+    } else {
+      invalidProject(`${path}.${key}`, "must be a JSON scalar");
+    }
+  }
+  return result;
 }
 
 function normalizeActorPathPoints(value: unknown, path: string, legacySource: boolean): ActorPathPoint[] {
@@ -611,10 +847,10 @@ function ensureUniqueProjectIds(items: Array<{ id: string; pathPoints?: ScenePat
   }
 }
 
-function normalizeProjectVersion(value: unknown): 1 | 2 | 3 {
+function normalizeProjectVersion(value: unknown): 1 | 2 | 3 | 4 {
   const version = value === undefined ? 1 : Number(value);
-  if (version !== 1 && version !== 2 && version !== 3) {
-    invalidProject("version", "must be 1, 2, or 3");
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
+    invalidProject("version", "must be 1, 2, 3, or 4");
   }
   return version;
 }

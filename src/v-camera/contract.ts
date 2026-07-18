@@ -1,11 +1,13 @@
-export const VCAMERA_CONTRACT_VERSION = 2;
-export const VCAMERA_PROJECT_VERSION = 3;
+export const VCAMERA_CONTRACT_VERSION = 3;
+export const VCAMERA_PROJECT_VERSION = 4;
 
 export const VCAMERA_LIMITS = {
   sceneTime: { minimum: 0, maximum: 3600 },
   positiveSceneTime: { minimum: 0.000001, maximum: 3600 },
   fps: { minimum: 1, maximum: 120 },
   actorHeight: { minimum: 0.1, maximum: 20 },
+  seatHeight: { minimum: 0.1, maximum: 2.5 },
+  poseIntensity: { minimum: 0, maximum: 1 },
   rotation: { minimum: -36000, maximum: 36000 },
   scale: { minimum: 0.05, maximum: 10000 },
   fov: { minimum: 1, maximum: 179 },
@@ -20,6 +22,7 @@ export const VCAMERA_LIMITS = {
     cameraCuts: 2000,
     pathPointsPerEntity: 2000,
     actionMarkersPerActor: 2000,
+    poseKeyframesPerActor: 2000,
     visibilityKeyframesPerProp: 2000,
     pathPointsPerPatch: 20000,
     metadataFields: 50,
@@ -29,6 +32,15 @@ export const VCAMERA_LIMITS = {
 export const VCAMERA_ENUMS = {
   safeFrameRatio: ["off", "9:16", "16:9", "1:1"],
   sceneEasing: ["smooth", "linear", "ease_in", "ease_out", "ease_in_out"],
+  actorJointId: [
+    "pelvis", "spine_lower", "spine_upper", "neck", "head",
+    "upper_arm_l", "lower_arm_l", "hand_l", "upper_arm_r", "lower_arm_r", "hand_r",
+    "upper_leg_l", "lower_leg_l", "foot_l", "upper_leg_r", "lower_leg_r", "foot_r",
+  ],
+  actorPosePreset: [
+    "stand_neutral", "stand_attention", "sit_neutral", "sit_hands_on_thighs", "bow",
+    "hand_on_chest", "raise_hand", "support_chin", "kneel", "crouch", "lie_supine", "lie_prone",
+  ],
   propPreset: ["box", "thin_wall", "column", "platform", "obstacle", "door_frame", "stairs", "slope"],
   sourceType: ["primitive", "asset"],
   cameraMovementMode: ["static", "path", "follow"],
@@ -71,6 +83,12 @@ export const VCAMERA_DEFAULTS = {
     position: [0, 0, 0],
     rotation: [0, 0, 0],
     height: 1.75,
+    pose: {
+      rootOffset: [0, 0, 0],
+      jointRotations: {},
+      sourcePreset: "stand_neutral",
+      presetParameters: { intensity: 1, mirror: false },
+    },
   },
   primitiveProp: {
     position: [0, 0.5, 0],
@@ -166,7 +184,7 @@ export const VCAMERA_FIELDS = {
     duration: system("number", { derived: true, minimum: 1, maximum: VCAMERA_LIMITS.sceneTime.maximum, default: VCAMERA_DEFAULTS.project.duration, notes: ["Derived from the latest authored global scene time."] }),
     safeFrameRatio: raw("enum", ["project set --safe-frame"], { required: true, enum: "safeFrameRatio", default: VCAMERA_DEFAULTS.project.safeFrameRatio }),
     cubes: raw("collection", ["prop add", "prop set", "prop translate", "prop delete", "prop path", "prop visibility"], { required: true, itemType: "prop" }),
-    actors: raw("collection", ["actor add", "actor set", "actor translate", "actor delete", "actor path", "actor action"], { required: true, itemType: "actor" }),
+    actors: raw("collection", ["actor add", "actor set", "actor translate", "actor delete", "actor path", "actor action", "actor pose"], { required: true, itemType: "actor" }),
     cameras: raw("collection", ["camera add", "camera set", "camera translate", "camera delete", "camera path"], { required: true, itemType: "camera" }),
     cameraCuts: raw("collection", ["cut add", "cut set", "cut delete", "cut clear", "shot add", "shot set", "shot delete"], { required: true, itemType: "cameraCut" }),
     shots: raw("collection", ["shot add", "shot set", "shot delete"], { required: true, itemType: "shot" }),
@@ -183,7 +201,21 @@ export const VCAMERA_FIELDS = {
     lookAtActorId: raw("id", ["actor set --look-at-actor", "actor set --clear-look-at-actor", "actor set --clear-look-at"], { nullable: true, clearable: true, reference: "actor" }),
     lookAtPoint: vec3(["actor set --look-at-point", "actor set --clear-look-at-point", "actor set --clear-look-at"], { nullable: true, clearable: true }),
     actionMarkers: raw("collection", ["actor action add", "actor action set", "actor action delete", "actor action clear"], { itemType: "actionMarker" }),
+    pose: raw("object", ["actor add --pose-preset|--pose-json|--pose-file", "actor set --pose-preset|--pose-json|--pose-file|--reset-pose"], { required: true, itemType: "actorPose" }),
+    poseKeyframes: raw("collection", ["actor pose add", "actor pose set", "actor pose update", "actor pose delete", "actor pose clear"], { required: true, itemType: "actorPoseKeyframe" }),
     pathPoints: raw("collection", ["actor path add", "actor path set", "actor path update", "actor path delete", "actor path clear"], { required: true, itemType: "actorPathPoint" }),
+  },
+  actorPose: {
+    rootOffset: vec3(["actor pose", "actor add|set --pose-json|--pose-file"], { required: true, notes: ["Actor-local meters. Does not change actor.position."] }),
+    jointRotations: raw("joint_rotation_map", ["actor pose", "actor add|set --pose-json|--pose-file"], { required: true, enum: "actorJointId", notes: ["Actor-local XYZ degrees."] }),
+    sourcePreset: raw("enum", ["actor pose --preset", "actor add|set --pose-preset"], { nullable: true, enum: "actorPosePreset", notes: ["Metadata only; presets are resolved into rootOffset and jointRotations before writing."] }),
+    presetParameters: raw("object", ["actor pose --seat-height|--intensity|--mirror"], { notes: ["Optional seatHeight, intensity, and mirror provenance."] }),
+  },
+  actorPoseKeyframe: {
+    id: raw("id", ["actor pose add --id", "actor pose set --points-json"], { required: true, notes: ["Stable when updating a pose keyframe."] }),
+    time: time(["actor pose add --time", "actor pose update --time", "actor pose set --points-json"], { required: true, notes: ["Absolute global scene time."] }),
+    pose: raw("object", ["actor pose add|update", "actor pose set --points-json"], { required: true, itemType: "actorPose" }),
+    easing: raw("enum", ["actor pose add|update --easing", "actor pose update --clear-easing"], { nullable: true, clearable: true, enum: "sceneEasing" }),
   },
   actorPathPoint: {
     id: raw("id", ["actor path add --id", "actor path set --points-json"], { required: true, notes: ["Stable when updating a path point."] }),
@@ -284,10 +316,20 @@ export const VCAMERA_CONTRACT = {
     unit: "seconds",
     minimum: VCAMERA_LIMITS.sceneTime.minimum,
     maximum: VCAMERA_LIMITS.sceneTime.maximum,
-    description: "Every path point, action marker, visibility keyframe, shot boundary, and camera cut uses absolute time from scene second 0.",
+    description: "Every path point, pose keyframe, action marker, visibility keyframe, shot boundary, and camera cut uses absolute time from scene second 0.",
     duplicatePathTime: {
       version3: "reject",
+      version4: "reject",
       legacyMigration: "stable_offset_1ms",
+    },
+    interpolation: {
+      positionPath: "piecewise_eased_linear",
+      easingAppliesTo: "time_progress_only",
+      identicalEndpointBehavior: "exact_hold",
+      overshootAllowed: false,
+      afterLastKeyframe: "exact_final_hold",
+      rotationPath: "shortest_angle",
+      poseRotationPath: "quaternion_slerp",
     },
   },
   spatial: {
@@ -340,6 +382,10 @@ export const VCAMERA_CONTRACT = {
     "actor.pathPoints.position": "behavioral",
     "actor.pathPoints.yaw": "behavioral",
     "actor.pathPoints.easing": "behavioral",
+    "actor.pose": "rendered/behavioral",
+    "actor.poseKeyframes": "rendered/behavioral",
+    "actor.pose.sourcePreset": "metadata-only",
+    "actor.actionMarkers": "semantic/metadata-only",
     "prop.pathPoints.position": "behavioral",
     "prop.pathPoints.rotation": "behavioral",
     "prop.pathPoints.easing": "behavioral",
@@ -376,16 +422,21 @@ export const VCAMERA_CONTRACT = {
     { id: "shot_cut_sync", description: "Each shot owns one camera cut at shot.startTime with the same cameraId." },
     { id: "cut_anchor_sync", description: "An actor-path-point camera cut anchor uses the same absolute time as its referenced path point." },
     { id: "zero_time_origin", description: "A zero-time path point is the canonical initial position. Raw set --position refuses to diverge from it unless --sync-origin is explicit." },
-    { id: "derived_duration", description: "Project duration is derived from the latest authored track, marker, shot end, or camera cut." },
-    { id: "duplicate_path_time", description: "Version 3 rejects duplicate path times within the same entity. Version 1 and 2 inspection migrates duplicates deterministically by stable ID in 1ms steps." },
+    { id: "derived_duration", description: "Project duration is derived from the latest authored path, pose keyframe, marker, shot end, or camera cut." },
+    { id: "duplicate_path_time", description: "Version 3 and 4 reject duplicate path times within the same entity. Version 1 and 2 inspection migrates duplicates deterministically by stable ID in 1ms steps." },
+    { id: "pose_independence", description: "actor.pose changes internal body posture only and never moves actor.position or actor.pathPoints." },
+    { id: "pose_tracking", description: "Camera head, chest, and center tracking points follow the actor's current rendered pose." },
     { id: "actor_delete_cleanup", description: "Deleting an actor clears actor look-at/action references, removes its anchored cuts, and resets cameras that tracked it using the same cleanup rules as the Virtual Shoot editor." },
     { id: "camera_lifecycle_cleanup", description: "Adding the first camera makes it active. Deleting a camera removes its shots and cuts; deleting the active camera selects the first remaining camera or null." },
     { id: "shot_lifecycle_cleanup", description: "Adding or editing a shot creates or synchronizes its managed camera cut. Deleting a shot also deletes that managed cut." },
     { id: "revision_safety", description: "Every mutation sends baseRevision and fails on conflicts without overwrite retries." },
+    { id: "atomic_scene_apply", description: "scene apply strictly validates a canonical complete project locally, rejects implicit normalization, and writes all scene fields to one explicit node in one revision-protected request." },
+    { id: "create_only_scene_apply", description: "scene apply --expected-empty maps to mode=create_only so a populated target cannot be replaced after inspection." },
   ],
   rawCommands: [
+    "scene apply",
     "project set",
-    "actor add|set|translate|delete|path|action",
+    "actor add|set|translate|delete|path|action|pose",
     "prop add|set|translate|delete|path|visibility",
     "camera add|set|translate|delete|path|preset",
     "shot add|set|delete",
@@ -448,6 +499,21 @@ export const VCAMERA_CONTRACT = {
     revisionField: "baseRevision",
     retriesOnConflict: false,
     genericNodeDataUpdateAllowed: false,
+    atomicSceneApply: {
+      command: "scene apply",
+      required: ["--canvas-id", "--node-id", "--file"],
+      optional: ["--expected-empty", "--dry-run", "--yes", "--json"],
+      projectVersion: VCAMERA_PROJECT_VERSION,
+      singleRequest: true,
+      expectedEmptyMode: "create_only",
+      protectedFieldsPreserved: true,
+      validation: {
+        localBeforeNetwork: true,
+        canonicalCompleteProject: true,
+        implicitNormalization: "reject",
+        shotMetadata: "maximum 50 fields; keys 1..80 characters; values JSON scalars",
+      },
+    },
   },
 } as const;
 

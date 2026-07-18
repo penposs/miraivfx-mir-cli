@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 import {
@@ -12,6 +15,13 @@ import {
 } from "../dist/v-camera/project.js";
 import { handleVCameraCommand } from "../dist/commands/v-camera.js";
 import { createCameraPresetPatch } from "../dist/v-camera/camera-presets.js";
+import {
+  createNeutralActorPose,
+  getActorPoseAtTime,
+  getActorTrackingPointWorldApproximation,
+  resolveActorPosePreset,
+} from "../dist/v-camera/actor-pose.js";
+import { interpolatePathPosition } from "../dist/v-camera/path-interpolation.js";
 import { VCAMERA_CONTRACT } from "../dist/v-camera/contract.js";
 import { getActorBasePoseBounds, getProjectSpatialSummary, getPropBasePoseBounds } from "../dist/v-camera/spatial.js";
 
@@ -23,6 +33,8 @@ const actor = {
   position: [0, 0, 0],
   rotation: [0, 0, 0],
   height: 1.75,
+  pose: createNeutralActorPose(),
+  poseKeyframes: [],
   pathPoints: [],
 };
 
@@ -32,6 +44,7 @@ const camera = {
   position: [0, 1.6, 6],
   rotation: [0, 180, 0],
   fov: 35,
+  focusDistance: 4,
   duration: 5,
   pathPoints: [],
   movementMode: "static",
@@ -45,7 +58,7 @@ const camera = {
 
 test("default project starts with editable V-camera collections", () => {
   const project = defaultVCameraProject();
-  assert.equal(project.version, 3);
+  assert.equal(project.version, 4);
   assert.equal(project.duration, 1);
   assert.deepEqual(project.actors, []);
   assert.deepEqual(project.cameraCuts, []);
@@ -70,7 +83,7 @@ test("props without an explicit proxy preset use the published box fallback", ()
   assert.equal(project.cubes[0].propPreset, "box");
 });
 
-test("legacy path data migrates to version 3 with stable duplicate timing and typed rotations", () => {
+test("legacy path data migrates to version 4 with stable duplicate timing, typed rotations, and neutral pose", () => {
   const project = normalizeProject({
     ...defaultVCameraProject(),
     version: 2,
@@ -97,7 +110,9 @@ test("legacy path data migrates to version 3 with stable duplicate timing and ty
       pathPoints: [{ id: "camera-path", time: 2, position: [0, 1.6, 2], yaw: -30 }],
     }],
   });
-  assert.equal(project.version, 3);
+  assert.equal(project.version, 4);
+  assert.deepEqual(project.actors[0].pose, createNeutralActorPose());
+  assert.deepEqual(project.actors[0].poseKeyframes, []);
   assert.deepEqual(project.actors[0].pathPoints.map((point) => [point.id, point.time]), [
     ["a", 1],
     ["b", 1.001],
@@ -286,7 +301,7 @@ test("actor add writes through the revision-protected V-camera endpoint", async 
   try {
     await handleVCameraCommand(api, "https://miraivfx.art", [
       "actor", "add", "--canvas-id", "canvas-1", "--node-id", "vcamera-node",
-      "--name", "Hero", "--position", "1,0,2", "--yes", "--json",
+      "--name", "actor_a", "--position", "1,0,2", "--yes", "--json",
     ], true);
   } finally {
     console.log = originalLog;
@@ -295,9 +310,450 @@ test("actor add writes through the revision-protected V-camera endpoint", async 
   assert.equal(calls[1].path, "/canvas/canvas-1/v-camera");
   assert.equal(calls[1].body.baseRevision, 12);
   assert.equal(calls[1].body.nodeId, "vcamera-node");
-  assert.equal(calls[1].body.patch.actors[0].name, "Hero");
+  assert.equal(calls[1].body.patch.actors[0].name, "actor_a");
   assert.deepEqual(calls[1].body.patch.actors[0].position, [1, 0, 2]);
   assert.equal("takes" in calls[1].body.patch, false);
+});
+
+test("version 3 actors without pose data migrate once to the neutral version 4 pose", () => {
+  const { pose: _pose, poseKeyframes: _poseKeyframes, ...legacyActor } = actor;
+  const migrated = normalizeProject({
+    ...defaultVCameraProject(),
+    version: 3,
+    actors: [legacyActor],
+  });
+  assert.equal(migrated.version, 4);
+  assert.deepEqual(migrated.actors[0].pose, createNeutralActorPose());
+  assert.deepEqual(migrated.actors[0].poseKeyframes, []);
+  assert.deepEqual(normalizeProject(migrated), migrated);
+});
+
+test("actor pose presets and global pose keyframes remain independent from actor position", async () => {
+  const poseCalls = [];
+  await withMutedConsole(() => handleVCameraCommand(mutationApi({
+    ...defaultVCameraProject(), actors: [actor],
+  }, poseCalls), "https://miraivfx.art", [
+    "actor", "set", "--canvas-id", "canvas-1", "--actor", actor.id,
+    "--pose-preset", "sit_hands_on_thighs", "--seat-height", "0.45", "--yes", "--json",
+  ], true));
+  const posedActor = poseCalls.find((call) => call.method === "POST").body.patch.actors[0];
+  assert.deepEqual(posedActor.position, actor.position);
+  assert.equal(posedActor.pose.sourcePreset, "sit_hands_on_thighs");
+  assert.equal(posedActor.pose.rootOffset[1], -0.477);
+
+  const keyframeCalls = [];
+  await withMutedConsole(() => handleVCameraCommand(mutationApi({
+    ...defaultVCameraProject(), actors: [actor],
+  }, keyframeCalls), "https://miraivfx.art", [
+    "actor", "pose", "add", "--canvas-id", "canvas-1", "--actor", actor.id,
+    "--time", "4.125", "--preset", "raise_hand", "--intensity", "0.8",
+    "--easing", "smooth", "--yes", "--json",
+  ], true));
+  const patch = keyframeCalls.find((call) => call.method === "POST").body.patch;
+  assert.deepEqual(patch.actors[0].position, actor.position);
+  assert.equal(patch.actors[0].poseKeyframes[0].time, 4.125);
+  assert.equal(patch.actors[0].poseKeyframes[0].pose.sourcePreset, "raise_hand");
+  assert.equal(patch.duration, 4.125);
+});
+
+test("actor pose keyframes support stable update, delete, and clear operations", async () => {
+  const baseActor = {
+    ...actor,
+    pathPoints: [{ id: "actor-path", time: 2, position: [1, 0, 0] }],
+    poseKeyframes: [{
+      id: "pose-stable",
+      time: 3,
+      pose: createNeutralActorPose(),
+      easing: "smooth",
+    }],
+  };
+  const updateCalls = [];
+  await withMutedConsole(() => handleVCameraCommand(mutationApi({
+    ...defaultVCameraProject(), actors: [baseActor],
+  }, updateCalls), "https://miraivfx.art", [
+    "actor", "pose", "update", "--canvas-id", "canvas-1", "--actor", actor.id,
+    "--point", "pose-stable", "--time", "3.25", "--preset", "support_chin",
+    "--clear-easing", "--yes", "--json",
+  ], true));
+  const updatedActor = updateCalls.find((call) => call.method === "POST").body.patch.actors[0];
+  assert.equal(updatedActor.poseKeyframes[0].id, "pose-stable");
+  assert.equal(updatedActor.poseKeyframes[0].time, 3.25);
+  assert.equal(updatedActor.poseKeyframes[0].pose.sourcePreset, "support_chin");
+  assert.equal(updatedActor.poseKeyframes[0].easing, undefined);
+  assert.deepEqual(updatedActor.position, baseActor.position);
+  assert.deepEqual(updatedActor.pathPoints, baseActor.pathPoints);
+
+  const deleteCalls = [];
+  await withMutedConsole(() => handleVCameraCommand(mutationApi({
+    ...defaultVCameraProject(), actors: [updatedActor],
+  }, deleteCalls), "https://miraivfx.art", [
+    "actor", "pose", "delete", "--canvas-id", "canvas-1", "--actor", actor.id,
+    "--point", "pose-stable", "--yes", "--json",
+  ], true));
+  assert.deepEqual(deleteCalls.find((call) => call.method === "POST").body.patch.actors[0].poseKeyframes, []);
+
+  const clearCalls = [];
+  await withMutedConsole(() => handleVCameraCommand(mutationApi({
+    ...defaultVCameraProject(), actors: [baseActor],
+  }, clearCalls), "https://miraivfx.art", [
+    "actor", "pose", "clear", "--canvas-id", "canvas-1", "--actor", actor.id,
+    "--yes", "--json",
+  ], true));
+  assert.deepEqual(clearCalls.find((call) => call.method === "POST").body.patch.actors[0].poseKeyframes, []);
+});
+
+test("invalid pose presets, joints, values, and duplicate keyframe times are rejected", async () => {
+  await assert.rejects(() => handleVCameraCommand(mutationApi({
+    ...defaultVCameraProject(), actors: [actor],
+  }, []), "https://miraivfx.art", [
+    "actor", "pose", "add", "--canvas-id", "canvas-1", "--actor", actor.id,
+    "--time", "1", "--preset", "unsupported_pose", "--dry-run",
+  ], false), /Invalid --preset/);
+
+  assert.throws(() => normalizeProject({
+    ...defaultVCameraProject(),
+    actors: [{ ...actor, pose: { ...createNeutralActorPose(), jointRotations: { unsupported_joint: [0, 0, 0] } } }],
+  }), /not a supported semantic joint/);
+  assert.throws(() => normalizeProject({
+    ...defaultVCameraProject(),
+    actors: [{ ...actor, pose: { ...createNeutralActorPose(), rootOffset: [Number.NaN, 0, 0] } }],
+  }), /must be a number/);
+  assert.throws(() => normalizeProject({
+    ...defaultVCameraProject(),
+    actors: [{ ...actor, poseKeyframes: [
+      { id: "pose-a", time: 1, pose: createNeutralActorPose() },
+      { id: "pose-b", time: 1, pose: createNeutralActorPose() },
+    ] }],
+  }), /duplicate time/);
+});
+
+test("semantic action markers never alter an actor pose", () => {
+  const posed = { ...actor, pose: { ...createNeutralActorPose(), sourcePreset: "raise_hand", jointRotations: { upper_arm_r: [0, 0, 154] } } };
+  const normalized = normalizeProject({
+    ...defaultVCameraProject(),
+    actors: [{ ...posed, actionMarkers: [{ id: "action-a", time: 1, action: "turn_head" }] }],
+  });
+  assert.deepEqual(normalized.actors[0].pose, posed.pose);
+});
+
+test("pose sampling holds the final pose and lowers camera tracking targets when seated", () => {
+  const seated = resolveActorPosePreset("sit_neutral", 1.7, { seatHeight: 0.45 });
+  const posedActor = {
+    ...actor,
+    height: 1.7,
+    poseKeyframes: [{ id: "pose-a", time: 2, pose: seated, easing: "smooth" }],
+  };
+  assert.deepEqual(getActorPoseAtTime(posedActor, 20), seated);
+  const standingHead = getActorTrackingPointWorldApproximation(actor, 0, "head");
+  const seatedHead = getActorTrackingPointWorldApproximation(posedActor, 20, "head");
+  assert.ok(seatedHead[1] < standingHead[1]);
+});
+
+test("scene path interpolation is bounded, holds stationary axes exactly, and holds the final point", () => {
+  const points = [
+    { id: "a", time: 1, position: [2, 4, 6], easing: "ease_in_out" },
+    { id: "b", time: 3, position: [2, 8, -2], easing: "ease_out" },
+  ];
+  const target = { position: [0, 0, 0], pathPoints: points };
+  const middle = interpolatePathPosition(target, 2);
+  assert.equal(middle[0], 2);
+  assert.ok(middle[1] >= 4 && middle[1] <= 8);
+  assert.ok(middle[2] >= -2 && middle[2] <= 6);
+  assert.deepEqual(interpolatePathPosition(target, 30), [2, 8, -2]);
+});
+
+test("fractional path endpoints stay exactly collinear without per-axis rounding", () => {
+  const end = [1.1, 2.3, -3.7];
+  const target = {
+    position: [0, 0, 0],
+    pathPoints: [
+      { id: "start", time: 0, position: [0, 0, 0], easing: "linear" },
+      { id: "end", time: 3, position: end, easing: "linear" },
+    ],
+  };
+  const point = interpolatePathPosition(target, 1);
+  const progress = point[0] / end[0];
+  assert.ok(Math.abs(point[1] - end[1] * progress) < 1e-12);
+  assert.ok(Math.abs(point[2] - end[2] * progress) < 1e-12);
+});
+
+test("shared interpolation conformance vectors preserve exact holds for actor, prop, camera, and presets", () => {
+  const points = [
+    { id: "p0", time: 0, position: [-2, 0, 0], easing: "linear" },
+    { id: "p1", time: 1, position: [0, 0, 0], easing: "linear" },
+    { id: "p2", time: 2, position: [0, 0, 0], easing: "linear" },
+    { id: "p3", time: 3, position: [10, 0, 0], easing: "linear" },
+  ];
+  for (const time of [1, 1.1, 1.25, 1.5, 1.75, 1.9, 2]) {
+    for (const kind of ["actor", "prop", "camera"]) {
+      assert.deepEqual(interpolatePathPosition({ kind, position: [-2, 0, 0], pathPoints: points }, time), [0, 0, 0]);
+    }
+  }
+
+  const finalTarget = {
+    position: [0, 0, 0],
+    pathPoints: [
+      { id: "start", time: 0, position: [0, 0, 0], easing: "smooth" },
+      { id: "end", time: 4, position: [5, 1, 8], easing: "smooth" },
+      { id: "hold", time: 6, position: [5, 1, 8], easing: "smooth" },
+    ],
+  };
+  for (const time of [4, 4.001, 5, 6, 7, 60]) {
+    assert.deepEqual(interpolatePathPosition(finalTarget, time), [5, 1, 8]);
+  }
+
+  const input = {
+    preset: "push_in",
+    camera,
+    startTime: 1.5,
+    duration: 1,
+    easing: "smooth",
+    amountScale: 1,
+    preserveSubjectScale: true,
+  };
+  const heldActor = { ...actor, position: [-2, 0, 0], pathPoints: points };
+  const sampledPreset = createCameraPresetPatch({ ...input, actor: heldActor });
+  const exactPreset = createCameraPresetPatch({ ...input, actor: { ...actor, position: [0, 0, 0] } });
+  assert.deepEqual(
+    sampledPreset.pathPoints.map(({ id: _id, ...point }) => point),
+    exactPreset.pathPoints.map(({ id: _id, ...point }) => point),
+  );
+});
+
+test("scene apply dry-run validates a complete project without writing", async () => {
+  const scene = {
+    ...defaultVCameraProject(),
+    name: "Imported scene",
+    duration: 5,
+    actors: [actor],
+    cameras: [camera],
+    shots: [{
+      id: "shot-1",
+      name: "Opening",
+      startTime: 0,
+      endTime: 5,
+      cameraId: camera.id,
+      locked: false,
+      metadata: {},
+    }],
+    cameraCuts: [{ id: "cut-1", time: 0, cameraId: camera.id, shotId: "shot-1" }],
+    activeCameraId: camera.id,
+  };
+  await withSceneFile(scene, async (file) => {
+    let postCount = 0;
+    const api = {
+      async getJson() {
+        return {
+          success: true,
+          data: {
+            id: "canvas-1",
+            project_id: "project-1",
+            name: "Canvas",
+            revision: 21,
+            nodes: [{ id: "vcamera-b", type: "v-camera", data: { vCameraProject: defaultVCameraProject() } }],
+          },
+        };
+      },
+      async postJson() {
+        postCount += 1;
+        throw new Error("dry-run must not write");
+      },
+    };
+    let output = "";
+    const originalLog = console.log;
+    console.log = (value) => { output = String(value); };
+    try {
+      await handleVCameraCommand(api, "https://miraivfx.art", [
+        "scene", "apply", "--canvas-id", "canvas-1", "--node-id", "vcamera-b",
+        "--file", file, "--expected-empty", "--dry-run", "--json",
+      ], true);
+    } finally {
+      console.log = originalLog;
+    }
+
+    const payload = JSON.parse(output);
+    assert.equal(postCount, 0);
+    assert.equal(payload.base_revision, 21);
+    assert.equal(payload.node_id, "vcamera-b");
+    assert.equal(payload.mode, "create_only");
+    assert.equal(payload.validation.valid, true);
+    assert.equal(payload.validation.contract_version, 3);
+    assert.equal(payload.validation.project_version, 4);
+    assert.deepEqual(payload.validation.invalid_joint_ids, []);
+    assert.equal(payload.validation.duration_covers_last_pose_keyframe, true);
+    assert.equal(payload.counts.actors, 1);
+    assert.equal(payload.counts.cameras, 1);
+    assert.equal(payload.counts.pose_keyframes, 0);
+    assert.deepEqual(payload.pose_presets, ["stand_neutral"]);
+    assert.equal(payload.write_request_count, 0);
+  });
+});
+
+test("scene apply sends one complete revision-protected request to the explicit node", async () => {
+  const scene = {
+    ...defaultVCameraProject(),
+    name: "Atomic scene",
+    safeFrameRatio: "9:16",
+    actors: [actor],
+    cameras: [camera],
+    activeCameraId: camera.id,
+  };
+  await withSceneFile(scene, async (file) => {
+    const calls = [];
+    const api = {
+      async getJson(path) {
+        calls.push({ method: "GET", path });
+        return {
+          success: true,
+          data: {
+            id: "canvas-1",
+            project_id: "project-1",
+            name: "Canvas",
+            revision: 34,
+            nodes: [
+              { id: "vcamera-a", type: "v-camera", data: { vCameraProject: { ...defaultVCameraProject(), name: "A" } } },
+              { id: "vcamera-b", type: "v-camera", data: { vCameraProject: defaultVCameraProject() } },
+            ],
+          },
+        };
+      },
+      async postJson(path, body) {
+        calls.push({ method: "POST", path, body });
+        return {
+          success: true,
+          data: {
+            canvas_id: "canvas-1",
+            project_id: "project-1",
+            node_id: "vcamera-b",
+            revision: 35,
+            clientModifiedAt: 1234,
+            changedFields: Object.keys(body.patch),
+            duration: 1,
+            project: body.patch,
+          },
+        };
+      },
+    };
+
+    await withMutedConsole(() => handleVCameraCommand(api, "https://miraivfx.art", [
+      "scene", "apply", "--canvas-id", "canvas-1", "--node-id", "vcamera-b",
+      "--file", file, "--expected-empty", "--yes", "--json",
+    ], true));
+
+    assert.equal(calls.filter((call) => call.method === "GET").length, 1);
+    assert.equal(calls.filter((call) => call.method === "POST").length, 1);
+    const write = calls.find((call) => call.method === "POST");
+    assert.equal(write.path, "/canvas/canvas-1/v-camera");
+    assert.equal(write.body.nodeId, "vcamera-b");
+    assert.equal(write.body.baseRevision, 34);
+    assert.equal(write.body.mode, "create_only");
+    assert.equal(write.body.patch.version, 4);
+    assert.equal(write.body.patch.name, "Atomic scene");
+    assert.equal(write.body.patch.safeFrameRatio, "9:16");
+    assert.equal("takes" in write.body.patch, false);
+    assert.equal("savedScenes" in write.body.patch, false);
+  });
+});
+
+test("scene apply expected-empty rejects a populated target before writing", async () => {
+  const scene = defaultVCameraProject();
+  await withSceneFile(scene, async (file) => {
+    let postCount = 0;
+    const api = {
+      async getJson() {
+        return {
+          success: true,
+          data: {
+            id: "canvas-1",
+            project_id: "project-1",
+            name: "Canvas",
+            revision: 8,
+            nodes: [{
+              id: "vcamera-b",
+              type: "v-camera",
+              data: { vCameraProject: { ...defaultVCameraProject(), actors: [actor] } },
+            }],
+          },
+        };
+      },
+      async postJson() {
+        postCount += 1;
+      },
+    };
+
+    await assert.rejects(() => handleVCameraCommand(api, "https://miraivfx.art", [
+      "scene", "apply", "--canvas-id", "canvas-1", "--node-id", "vcamera-b",
+      "--file", file, "--expected-empty", "--yes", "--json",
+    ], true), /target_not_empty/);
+    assert.equal(postCount, 0);
+  });
+});
+
+test("scene apply rejects dangling references locally with zero requests", async () => {
+  const invalidScene = {
+    ...defaultVCameraProject(),
+    duration: 2,
+    shots: [{
+      id: "shot-invalid",
+      name: "Invalid",
+      startTime: 0,
+      endTime: 2,
+      cameraId: "missing-camera",
+      locked: false,
+      metadata: {},
+    }],
+  };
+  await withSceneFile(invalidScene, async (file) => {
+    let requestCount = 0;
+    const api = {
+      async getJson() { requestCount += 1; },
+      async postJson() { requestCount += 1; },
+    };
+    await assert.rejects(() => handleVCameraCommand(api, "https://miraivfx.art", [
+      "scene", "apply", "--canvas-id", "canvas-1", "--node-id", "vcamera-b",
+      "--file", file, "--dry-run", "--json",
+    ], true), /references missing camera/);
+    assert.equal(requestCount, 0);
+  });
+});
+
+test("scene apply rejects implicit defaults and non-scalar metadata before any request", async () => {
+  const incompleteCamera = { ...camera };
+  delete incompleteCamera.focusDistance;
+  const invalidScenes = [
+    { ...defaultVCameraProject(), cameras: [incompleteCamera] },
+    {
+      ...defaultVCameraProject(),
+      duration: 2,
+      cameras: [camera],
+      shots: [{
+        id: "shot-invalid-metadata",
+        name: "Invalid metadata",
+        startTime: 0,
+        endTime: 2,
+        cameraId: camera.id,
+        locked: false,
+        metadata: { nested: { unsupported: true } },
+      }],
+      cameraCuts: [{ id: "cut-invalid-metadata", time: 0, cameraId: camera.id, shotId: "shot-invalid-metadata" }],
+      activeCameraId: camera.id,
+    },
+  ];
+
+  for (const scene of invalidScenes) {
+    await withSceneFile(scene, async (file) => {
+      let requestCount = 0;
+      const api = {
+        async getJson() { requestCount += 1; },
+        async postJson() { requestCount += 1; },
+      };
+      await assert.rejects(() => handleVCameraCommand(api, "https://miraivfx.art", [
+        "scene", "apply", "--canvas-id", "canvas-1", "--node-id", "vcamera-b",
+        "--file", file, "--dry-run", "--json",
+      ], true));
+      assert.equal(requestCount, 0);
+    });
+  }
 });
 
 test("dry-run maps camera fields without issuing a write", async () => {
@@ -447,8 +903,8 @@ test("shot add creates a camera cut at the shot start on the global timeline", a
   const api = mutationApi(project, calls);
   await withMutedConsole(() => handleVCameraCommand(api, "https://miraivfx.art", [
     "shot", "add", "--canvas-id", "canvas-1", "--camera", camera.id,
-    "--name", "S02 Push in", "--start-time", "8", "--duration", "5",
-    "--metadata-json", '{"scriptRef":"S02","priority":2}', "--yes", "--json",
+    "--name", "shot_02", "--start-time", "8", "--duration", "5",
+    "--metadata-json", '{"scriptRef":"shot_02","priority":2}', "--yes", "--json",
   ], true));
 
   const patch = calls.find((call) => call.method === "POST").body.patch;
@@ -457,7 +913,7 @@ test("shot add creates a camera cut at the shot start on the global timeline", a
   assert.equal(patch.cameraCuts[0].time, 8);
   assert.equal(patch.cameraCuts[0].cameraId, camera.id);
   assert.equal(patch.cameraCuts[0].shotId, patch.shots[0].id);
-  assert.deepEqual(patch.shots[0].metadata, { scriptRef: "S02", priority: 2 });
+  assert.deepEqual(patch.shots[0].metadata, { scriptRef: "shot_02", priority: 2 });
   assert.equal(patch.duration, 13);
 });
 
@@ -498,6 +954,15 @@ test("V-camera create dry-run never contacts the API even when --yes is present"
   });
   const payload = JSON.parse(stdout);
   assert.equal(payload.dry_run, true);
+  assert.equal(payload.node_type, "v-camera");
+  assert.equal(typeof payload.x, "number");
+  assert.equal(typeof payload.y, "number");
+  assert.deepEqual(payload.layout, {
+    x: payload.x,
+    y: payload.y,
+    width: payload.width,
+    height: payload.height,
+  });
   assert.equal(payload.canvas_id, "canvas-1");
   assert.equal(payload.ops[0].type, "add_node");
   assert.equal(payload.ops[0].node.type, "v-camera");
@@ -622,8 +1087,8 @@ test("Virtual Shoot capabilities is offline and machine readable", async () => {
     },
   });
   const contract = JSON.parse(stdout);
-  assert.equal(contract.contractVersion, 2);
-  assert.equal(contract.projectVersion, 3);
+  assert.equal(contract.contractVersion, 3);
+  assert.equal(contract.projectVersion, 4);
   assert.equal(contract.timeline.mode, "single_global_timeline");
   assert.equal(contract.timeline.maximum, 3600);
   assert.equal(contract.fields.camera.fov.maximum, 179);
@@ -637,7 +1102,46 @@ test("Virtual Shoot capabilities is offline and machine readable", async () => {
   assert.equal(contract.limits.focusDistance.maximum, 1000000);
   assert.equal(contract.fields.camera.fov.minimum, 1);
   assert.ok(contract.rawCommandEffects["camera delete"]);
+  assert.ok(contract.rawCommands.includes("scene apply"));
+  assert.equal(contract.mutationSafety.atomicSceneApply.singleRequest, true);
+  assert.equal(contract.mutationSafety.atomicSceneApply.projectVersion, 4);
+  assert.equal(contract.timeline.interpolation.positionPath, "piecewise_eased_linear");
+  assert.equal(contract.timeline.interpolation.overshootAllowed, false);
+  assert.equal(contract.runtimeEffects["actor.pose"], "rendered/behavioral");
+  assert.equal(contract.mutationSafety.atomicSceneApply.protectedFieldsPreserved, true);
+  assert.equal(contract.mutationSafety.atomicSceneApply.validation.implicitNormalization, "reject");
   assert.equal(contract.compoundHelpers["camera follow"].stableForAutomation, false);
+});
+
+test("inspect reports versioned interpolation and pose-aware actor summaries", async () => {
+  const project = {
+    ...defaultVCameraProject(),
+    actors: [{
+      ...actor,
+      poseKeyframes: [{
+        id: "pose-a",
+        time: 3,
+        pose: { ...createNeutralActorPose(), sourcePreset: "raise_hand", jointRotations: { upper_arm_r: [0, 0, 154] } },
+      }],
+    }],
+  };
+  let output = "";
+  const originalLog = console.log;
+  console.log = (value) => { output = String(value); };
+  try {
+    await handleVCameraCommand(mutationApi(project, []), "https://miraivfx.art", [
+      "inspect", "--canvas-id", "canvas-1", "--node-id", "vcamera-node", "--json",
+    ], true);
+  } finally {
+    console.log = originalLog;
+  }
+  const payload = JSON.parse(output);
+  assert.equal(payload.contract_version, 3);
+  assert.equal(payload.project_version, 4);
+  assert.equal(payload.timeline_interpolation.positionPath, "piecewise_eased_linear");
+  assert.equal(payload.actor_pose_summary[0].keyframe_count, 1);
+  assert.equal(payload.actor_pose_summary[0].last_pose_time, 3);
+  assert.equal(payload.actor_pose_summary[0].tracking_points.head.length, 3);
 });
 
 test("capabilities covers every formal scene entity field", () => {
@@ -647,7 +1151,7 @@ test("capabilities covers every formal scene entity field", () => {
   ]);
   assert.deepEqual(Object.keys(VCAMERA_CONTRACT.fields.actor).sort(), [
     "actionMarkers", "height", "id", "lookAtActorId", "lookAtPoint", "name", "pathPoints",
-    "position", "rotation",
+    "pose", "poseKeyframes", "position", "rotation",
   ]);
   assert.deepEqual(Object.keys(VCAMERA_CONTRACT.fields.prop).sort(), [
     "assetId", "id", "locked", "name", "pathPoints", "position", "propPreset", "rotation",
@@ -874,7 +1378,7 @@ test("camera preset creates globally timed editable paths and expands project du
   assert.equal(patch.duration, 13);
 });
 
-test("camera presets sample actor motion with the same eased cubic path used by the node", () => {
+test("camera presets sample actor motion with the same bounded eased linear path used by the node", () => {
   const movingActor = {
     ...actor,
     pathPoints: [
@@ -894,7 +1398,7 @@ test("camera presets sample actor motion with the same eased cubic path used by 
   const movingPatch = createCameraPresetPatch({ ...input, actor: movingActor });
   const expectedPatch = createCameraPresetPatch({
     ...input,
-    actor: { ...actor, position: [5.625, 0, 0] },
+    actor: { ...actor, position: [5, 0, 0] },
   });
 
   assert.deepEqual(
@@ -1048,7 +1552,7 @@ test("revision conflicts fail without retrying or overwriting", async () => {
     },
   };
   await assert.rejects(() => withMutedConsole(() => handleVCameraCommand(api, "https://miraivfx.art", [
-    "actor", "set", "--canvas-id", "canvas-1", "--actor", actor.id, "--name", "Hero", "--yes",
+    "actor", "set", "--canvas-id", "canvas-1", "--actor", actor.id, "--name", "actor_a", "--yes",
   ], false)), /revision_conflict/);
   assert.equal(postCount, 1);
 });
@@ -1092,5 +1596,16 @@ async function withMutedConsole(callback) {
     await callback();
   } finally {
     console.log = originalLog;
+  }
+}
+
+async function withSceneFile(scene, callback) {
+  const directory = await mkdtemp(join(tmpdir(), "mir-cli-vcamera-"));
+  const file = join(directory, "scene.json");
+  try {
+    await writeFile(file, JSON.stringify(scene), "utf8");
+    await callback(file);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 }

@@ -17,7 +17,7 @@ Use `mir-cli` when you want to:
 - read the currently available models and parameters
 - create a new project or a new canvas
 - keep complex creative work laid out clearly
-- set Virtual Shoot actors, props, camera fields, global paths, shots, and camera cuts
+- set Virtual Shoot actors, lightweight poses, props, camera fields, global paths, shots, and camera cuts
 
 ## Install
 
@@ -213,32 +213,33 @@ mir-cli canvas v-camera create --canvas-id <canvas_id> --yes --json
 mir-cli canvas v-camera inspect --canvas-id <canvas_id> --json
 ```
 
-`v-camera capabilities --json` is a versioned machine-readable contract and works without login or network access. It is the authoritative entry point for fields, defaults, ranges, references, world rules, derived/runtime/protected data, raw lifecycle effects, and compound-helper effects.
+`v-camera capabilities --json` is the versioned machine-readable contract (`contractVersion=3`, `projectVersion=4`) and works without login or network access. It is the authoritative entry point for fields, pose schemas, defaults, ranges, references, world rules, interpolation behavior, derived/runtime/protected data, raw lifecycle effects, and compound-helper effects.
 
 Add an actor and give it a timed 3D path. Positions use `x,y,z`, and path times accept millisecond precision:
 
 ```powershell
-mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "Hero" --position "0,0,0" --yes --json
-mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "Hero" --time 2.125 --position "2,0,4" --yaw 45 --yes --json
+mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "actor_a" --position "0,0,0" --pose-preset stand_neutral --yes --json
+mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "actor_a" --time 2.125 --position "2,0,4" --yaw 45 --yes --json
+mir-cli canvas v-camera actor pose add --canvas-id <canvas_id> --actor "actor_a" --time 4.5 --preset sit_neutral --seat-height 0.45 --easing smooth --yes --json
 ```
 
 Add a camera, map its server-side tracking fields, and write an exact camera path:
 
 ```powershell
-mir-cli canvas v-camera camera add --canvas-id <canvas_id> --name "Camera A" --position "0,1.6,6" --yes --json
-mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "Camera A" --movement-mode follow --aim-mode actor --tracking-actor "Hero" --tracking-point chest --follow-offset "0,1.6,3" --follow-speed 6 --motion-preset chase_follow --yes --json
-mir-cli canvas v-camera camera path set --canvas-id <canvas_id> --camera "Camera A" --points-json '[{"time":8,"position":[0,1.6,6],"fov":35},{"time":13,"position":[2,1.6,3],"rotation":[0,12,0],"fov":52,"easing":"ease_out"}]' --yes --json
+mir-cli canvas v-camera camera add --canvas-id <canvas_id> --name "camera_a" --position "0,1.6,6" --yes --json
+mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "camera_a" --movement-mode follow --aim-mode actor --tracking-actor "actor_a" --tracking-point chest --follow-offset "0,1.6,3" --follow-speed 6 --motion-preset chase_follow --yes --json
+mir-cli canvas v-camera camera path set --canvas-id <canvas_id> --camera "camera_a" --points-json '[{"time":8,"position":[0,1.6,6],"fov":35},{"time":13,"position":[2,1.6,3],"rotation":[0,12,0],"fov":52,"easing":"ease_out"}]' --yes --json
 ```
 
-Camera placement, movement, framing, and timing are supplied through explicit scene fields and global-time keyframes. `motionPreset` is stored as metadata; camera paths are supplied through the path commands.
+Position paths use bounded piecewise eased-linear interpolation: easing changes only time progress, stationary axes remain exact, spatial overshoot is forbidden, and the final point is held exactly. Actor pose keyframes use the same global timeline; pose changes never move actor world position or path points. Camera placement, movement, framing, and timing are supplied through explicit scene fields and global-time keyframes. `motionPreset` is stored as metadata; camera paths are supplied through the path commands.
 
 Raw `set` commands change only explicitly supplied fields. Setting a base position does not move authored path points; use `actor|prop|camera translate --delta x,y,z` when both the base and the complete path should move. A zero-time path point is the canonical origin and requires explicit `--sync-origin` when changing the base position.
 
 Schedule a camera cut by time, or anchor it to an actor path point:
 
 ```powershell
-mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera A" --time 4.5 --yes --json
-mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera B" --actor "Hero" --point <path_point_id> --yes --json
+mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "camera_a" --time 4.5 --yes --json
+mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "camera_b" --actor "actor_a" --point <path_point_id> --yes --json
 ```
 
 Anchored cuts inherit the actor path point time automatically. Every mutation supports `--dry-run`. The server rejects stale revisions, so simultaneous web edits cannot be silently overwritten. Virtual Shoot CLI commands do not edit recordings, takes, uploaded media, or generated results.

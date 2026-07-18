@@ -1,23 +1,36 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { ApiClient } from "../api/client.js";
 import { getFlagValue, hasFlag } from "../core/args.js";
 import { json, text } from "../core/output.js";
 import {
+  VCAMERA_CONTRACT,
+  VCAMERA_CONTRACT_VERSION,
   VCAMERA_DEFAULTS,
   VCAMERA_ENUMS,
   VCAMERA_LIMITS,
+  VCAMERA_PROJECT_VERSION,
 } from "../v-camera/contract.js";
 import {
   Actor,
+  ActorPose,
+  ActorPoseKeyframe,
+  ActorPosePreset,
   Camera,
   CameraShot,
   cameraOffsetInActorSpace,
   CameraTrackingPoint,
   clone,
   defaultVCameraProject,
+  getCompleteScenePatch,
   isMotionPreset,
+  isSceneProjectEmpty,
   isRecord,
   normalizeProject,
+  normalizeActorPoseValue,
+  normalizeCompleteSceneProject,
+  normalizePoseKeyframes,
   parseCameraPathPoints,
   parsePathPoints,
   parsePropPathPoints,
@@ -35,6 +48,7 @@ import {
 } from "../v-camera/project.js";
 import { createCameraPresetPatch, mergePresetPathPoints } from "../v-camera/camera-presets.js";
 import { getProjectSpatialSummary } from "../v-camera/spatial.js";
+import { createNeutralActorPose, getActorTrackingPointWorldApproximation, resolveActorPosePreset } from "../v-camera/actor-pose.js";
 
 interface CanvasData {
   id: string;
@@ -60,6 +74,8 @@ interface ProjectPatchResponse {
     revision: number;
     clientModifiedAt: number;
     changedFields: string[];
+    duration?: number;
+    project?: VCameraProject;
   };
   error?: string;
 }
@@ -93,6 +109,13 @@ export async function handleVCameraCommand(
     await inspectVCamera(api, args.slice(1), asJson);
     return;
   }
+  if (subject === "scene") {
+    if (rawAction !== "apply") {
+      throw new Error("Usage: mir-cli canvas v-camera scene apply --canvas-id <id> --node-id <id> --file <scene.json> --dry-run|--yes");
+    }
+    await applyCompleteScene(api, appBase, tail, asJson);
+    return;
+  }
   if (!subject) {
     text(vCameraUsage());
     return;
@@ -100,7 +123,7 @@ export async function handleVCameraCommand(
 
   let action = rawAction;
   let rest = tail;
-  if (["path", "action", "visibility"].includes(rawAction)) {
+  if (["path", "action", "visibility", "pose"].includes(rawAction)) {
     action = `path-${tail[0] ?? ""}`;
     if (rawAction !== "path") action = `${rawAction}-${tail[0] ?? ""}`;
     rest = tail.slice(1);
@@ -162,6 +185,118 @@ export async function handleVCameraCommand(
   asJson ? json(payload) : text(`Updated ${mutation.operation} on V-camera node ${response.data.node_id}`);
 }
 
+async function applyCompleteScene(
+  api: ApiClient,
+  appBase: string,
+  args: string[],
+  asJson: boolean,
+): Promise<void> {
+  const canvasId = requireFlag(args, "--canvas-id");
+  const nodeId = requireFlag(args, "--node-id");
+  const file = requireFlag(args, "--file");
+  const dryRun = hasFlag(args, "--dry-run");
+  const expectedEmpty = hasFlag(args, "--expected-empty");
+  if (!dryRun && !hasFlag(args, "--yes")) {
+    throw new Error("Applying a complete V-camera scene requires explicit --yes (or use --dry-run)");
+  }
+
+  let source: unknown;
+  try {
+    source = JSON.parse(await readFile(file, "utf8")) as unknown;
+  } catch (error) {
+    throw new Error(`Unable to read V-camera scene file ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const project = normalizeCompleteSceneProject(source);
+  const patch = getCompleteScenePatch(project);
+  const canvas = await getCanvas(api, canvasId);
+  const node = findVCameraNode(canvas, nodeId);
+  const targetProject = normalizeProject(getNodeProject(node));
+  const targetEmpty = isSceneProjectEmpty(targetProject);
+  if (expectedEmpty && !targetEmpty) {
+    throw new Error(`V-camera target_not_empty: node ${nodeId} already contains authored scene content`);
+  }
+
+  const counts = {
+    props: project.cubes.length,
+    actors: project.actors.length,
+    cameras: project.cameras.length,
+    shots: project.shots.length,
+    camera_cuts: project.cameraCuts.length,
+    path_points: [...project.cubes, ...project.actors, ...project.cameras]
+      .reduce((total, entity) => total + entity.pathPoints.length, 0),
+    pose_keyframes: project.actors.reduce((total, actor) => total + actor.poseKeyframes.length, 0),
+  };
+  const posePresets = [...new Set(project.actors.flatMap((actor) => [
+    actor.pose.sourcePreset,
+    ...actor.poseKeyframes.map((frame) => frame.pose.sourcePreset),
+  ]).filter((preset): preset is ActorPosePreset => preset !== null && preset !== undefined))].sort();
+  const lastPoseTime = Math.max(0, ...project.actors.flatMap((actor) => actor.poseKeyframes.map((frame) => frame.time)));
+  const changedFields = Object.keys(patch).sort();
+  if (dryRun) {
+    const payload = {
+      ok: true,
+      dry_run: true,
+      operation: "scene.apply",
+      canvas_id: canvas.id,
+      node_id: String(node.id),
+      base_revision: canvas.revision ?? 0,
+      mode: expectedEmpty ? "create_only" : "update",
+      expected_empty: expectedEmpty,
+      target_empty: targetEmpty,
+      validation: {
+        valid: true,
+        contract_version: VCAMERA_CONTRACT_VERSION,
+        project_version: project.version,
+        schema: "valid",
+        references: "valid",
+        invalid_joint_ids: [],
+        non_finite_values: [],
+        duplicate_pose_keyframe_ids: [],
+        duplicate_pose_keyframe_times: [],
+        duration_covers_last_pose_keyframe: project.duration >= lastPoseTime,
+      },
+      pose_presets: posePresets,
+      field_count: changedFields.length,
+      changed_fields: changedFields,
+      counts,
+      duration: project.duration,
+      write_request_count: 0,
+    };
+    asJson ? json(payload) : text(`Dry run: scene.apply validated ${counts.actors} actors, ${counts.props} props, ${counts.cameras} cameras`);
+    return;
+  }
+
+  const response = await api.postJson<ProjectPatchResponse>(
+    `/canvas/${encodeURIComponent(canvas.id)}/v-camera`,
+    {
+      nodeId: String(node.id),
+      baseRevision: canvas.revision ?? 0,
+      mode: expectedEmpty ? "create_only" : "update",
+      patch,
+    },
+  );
+  if (!response.success || !response.data) {
+    throw new Error(response.error ?? "Failed to apply complete V-camera scene");
+  }
+
+  const url = `${appBase}/canvas?projectId=${encodeURIComponent(response.data.project_id)}&canvasId=${encodeURIComponent(canvas.id)}`;
+  const payload = {
+    ok: true,
+    operation: "scene.apply",
+    canvas_id: canvas.id,
+    project_id: response.data.project_id,
+    node_id: response.data.node_id,
+    revision: response.data.revision,
+    mode: expectedEmpty ? "create_only" : "update",
+    changed_fields: response.data.changedFields,
+    duration: response.data.duration ?? project.duration,
+    counts,
+    write_request_count: 1,
+    url,
+  };
+  asJson ? json(payload) : text(`Applied complete scene to V-camera node ${response.data.node_id}`);
+}
+
 function mutateProject(
   project: VCameraProject,
   subject: string,
@@ -210,12 +345,16 @@ function mutateActor(project: VCameraProject, action: string, args: string[]) {
   if (action === "add") {
     ensureCollectionCapacity(actors, VCAMERA_LIMITS.collections.actors, "actors");
     const id = getFlagValue(args, "--id") ?? `actor_${randomUUID()}`;
+    const height = optionalNumber(args, "--height", VCAMERA_LIMITS.actorHeight.minimum, VCAMERA_LIMITS.actorHeight.maximum)
+      ?? VCAMERA_DEFAULTS.actor.height;
     const actor: Actor = {
       id,
       name: getFlagValue(args, "--name") ?? nextNumericName(actors),
       position: parseVec3(getFlagValue(args, "--position"), "--position") ?? [...VCAMERA_DEFAULTS.actor.position] as Vec3,
       rotation: parseRotationVec3(getFlagValue(args, "--rotation"), "--rotation") ?? [...VCAMERA_DEFAULTS.actor.rotation] as Vec3,
-      height: optionalNumber(args, "--height", VCAMERA_LIMITS.actorHeight.minimum, VCAMERA_LIMITS.actorHeight.maximum) ?? VCAMERA_DEFAULTS.actor.height,
+      height,
+      pose: parseActorPoseInput(args, height, "--pose-preset") ?? createNeutralActorPose(),
+      poseKeyframes: [],
       pathPoints: [],
     };
     ensureUniqueId(actors, id, "Actor");
@@ -237,12 +376,15 @@ function mutateActor(project: VCameraProject, action: string, args: string[]) {
     const clearLookAtActor = hasFlag(args, "--clear-look-at-actor");
     const clearLookAtPoint = hasFlag(args, "--clear-look-at-point");
     const syncOrigin = hasFlag(args, "--sync-origin");
+    const resetPose = hasFlag(args, "--reset-pose");
+    const posePatch = parseActorPoseInput(args, height ?? actor.height, "--pose-preset");
+    if (resetPose && posePatch) throw new Error("Use either --reset-pose or a pose input");
     const lookAtActor = lookAtActorSelector
       ? resolveByIdOrName(actors, lookAtActorSelector, "Actor")
       : undefined;
     if (lookAtActor?.id === actor.id) throw new Error("--look-at-actor cannot reference the same actor");
     if (syncOrigin && position === undefined) throw new Error("--sync-origin requires --position");
-    if (name === undefined && position === undefined && rotation === undefined && height === undefined && !lookAtActor && !lookAtPoint && !clearLookAt && !clearLookAtActor && !clearLookAtPoint) {
+    if (name === undefined && position === undefined && rotation === undefined && height === undefined && !lookAtActor && !lookAtPoint && !clearLookAt && !clearLookAtActor && !clearLookAtPoint && !resetPose && !posePatch) {
       throw new Error("No actor fields provided");
     }
     actors[index] = {
@@ -256,6 +398,8 @@ function mutateActor(project: VCameraProject, action: string, args: string[]) {
       ...(clearLookAtActor ? { lookAtActorId: null } : {}),
       ...(clearLookAtPoint ? { lookAtPoint: null } : {}),
       ...(clearLookAt ? { lookAtActorId: null, lookAtPoint: null } : {}),
+      ...(resetPose ? { pose: createNeutralActorPose() } : {}),
+      ...(posePatch ? { pose: posePatch } : {}),
     };
     return {
       patch: { actors },
@@ -373,6 +517,79 @@ function mutateActor(project: VCameraProject, action: string, args: string[]) {
   if (action === "action-clear") {
     actors[index] = { ...actor, actionMarkers: [] };
     return { patch: { actors }, operation: "actor.action.clear", entityId: actor.id };
+  }
+  if (action === "pose-add") {
+    const frames = clone(actor.poseKeyframes ?? []);
+    ensureCollectionCapacity(frames, VCAMERA_LIMITS.collections.poseKeyframesPerActor, "actor pose keyframes");
+    const id = getFlagValue(args, "--id") ?? `pose_${randomUUID()}`;
+    ensureUniqueId(frames, id, "Pose keyframe");
+    const framePose = parseActorPoseInput(args, actor.height, "--preset");
+    if (!framePose) throw new Error("Provide --preset, --pose-json, or --pose-file");
+    const easing = parseEasing(getFlagValue(args, "--easing"));
+    const frame: ActorPoseKeyframe = {
+      id,
+      time: requiredNumber(args, "--time", VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum),
+      pose: framePose,
+      ...(easing ? { easing } : {}),
+    };
+    const poseKeyframes = normalizePoseKeyframes([...frames, frame]);
+    actors[index] = { ...actor, poseKeyframes };
+    return {
+      patch: { actors, ...(frame.time > project.duration ? { duration: frame.time } : {}) },
+      operation: "actor.pose.add",
+      entityId: id,
+    };
+  }
+  if (action === "pose-set") {
+    const source = parseJsonOrFile(args, "--points-json", "--file", "pose keyframes");
+    const poseKeyframes = normalizePoseKeyframes(source);
+    actors[index] = { ...actor, poseKeyframes };
+    const lastTime = poseKeyframes.at(-1)?.time ?? 0;
+    return {
+      patch: { actors, ...(lastTime > project.duration ? { duration: lastTime } : {}) },
+      operation: "actor.pose.set",
+      entityId: actor.id,
+    };
+  }
+  if (action === "pose-update") {
+    const pointId = requireFlag(args, "--point");
+    const frames = clone(actor.poseKeyframes ?? []);
+    const frameIndex = frames.findIndex((frame) => frame.id === pointId);
+    if (frameIndex < 0) throw new Error(`Pose keyframe not found: ${pointId}`);
+    const time = optionalNumber(args, "--time", VCAMERA_LIMITS.sceneTime.minimum, VCAMERA_LIMITS.sceneTime.maximum);
+    const framePose = parseActorPoseInput(args, actor.height, "--preset");
+    const easing = parseEasing(getFlagValue(args, "--easing"));
+    const clearEasing = hasFlag(args, "--clear-easing");
+    if (easing && clearEasing) throw new Error("Use either --easing or --clear-easing");
+    if (time === undefined && !framePose && !easing && !clearEasing) throw new Error("No pose keyframe fields provided");
+    let updated: ActorPoseKeyframe = {
+      ...frames[frameIndex],
+      ...(time === undefined ? {} : { time }),
+      ...(framePose ? { pose: framePose } : {}),
+      ...(easing ? { easing } : {}),
+    };
+    if (clearEasing) {
+      const { easing: _easing, ...rest } = updated;
+      updated = rest;
+    }
+    frames[frameIndex] = updated;
+    const poseKeyframes = normalizePoseKeyframes(frames);
+    actors[index] = { ...actor, poseKeyframes };
+    return {
+      patch: { actors, ...(updated.time > project.duration ? { duration: updated.time } : {}) },
+      operation: "actor.pose.update",
+      entityId: pointId,
+    };
+  }
+  if (action === "pose-delete") {
+    const pointId = requireFlag(args, "--point");
+    if (!(actor.poseKeyframes ?? []).some((frame) => frame.id === pointId)) throw new Error(`Pose keyframe not found: ${pointId}`);
+    actors[index] = { ...actor, poseKeyframes: actor.poseKeyframes.filter((frame) => frame.id !== pointId) };
+    return { patch: { actors }, operation: "actor.pose.delete", entityId: pointId };
+  }
+  if (action === "pose-clear") {
+    actors[index] = { ...actor, poseKeyframes: [] };
+    return { patch: { actors }, operation: "actor.pose.clear", entityId: actor.id };
   }
   return mutatePath(project, "actor", actor, actors, index, action, args);
 }
@@ -1180,12 +1397,29 @@ async function inspectVCamera(api: ApiClient, args: string[], asJson: boolean): 
   }
   const node = findVCameraNode(canvas, requestedNodeId);
   const project = normalizeProject(getNodeProject(node));
+  const currentTime = project.currentTime ?? 0;
   if (asJson) {
     json({
       canvas_id: canvas.id,
       node_id: String(node.id),
       revision: canvas.revision ?? 0,
+      contract_version: VCAMERA_CONTRACT_VERSION,
+      project_version: VCAMERA_PROJECT_VERSION,
+      current_time: currentTime,
+      timeline_interpolation: VCAMERA_CONTRACT.timeline.interpolation,
       project,
+      actor_pose_summary: project.actors.map((actor) => ({
+        actor_id: actor.id,
+        actor_name: actor.name,
+        source_preset: actor.pose.sourcePreset ?? null,
+        keyframe_count: actor.poseKeyframes.length,
+        last_pose_time: actor.poseKeyframes.at(-1)?.time ?? null,
+        tracking_points: {
+          head: getActorTrackingPointWorldApproximation(actor, currentTime, "head"),
+          chest: getActorTrackingPointWorldApproximation(actor, currentTime, "chest"),
+          center: getActorTrackingPointWorldApproximation(actor, currentTime, "center"),
+        },
+      })),
       spatial_summary: getProjectSpatialSummary(project),
     });
     return;
@@ -1194,6 +1428,7 @@ async function inspectVCamera(api: ApiClient, args: string[], asJson: boolean): 
     `V-camera node: ${String(node.id)}`,
     `Project: ${project.name}`,
     `Actors: ${project.actors.length}`,
+    `Pose keyframes: ${project.actors.reduce((total, actor) => total + actor.poseKeyframes.length, 0)}`,
     `Props: ${project.cubes.length}`,
     `Cameras: ${project.cameras.length}`,
     `Shots: ${project.shots.length}`,
@@ -1390,12 +1625,78 @@ function optionalBoolean(args: string[], flag: string): boolean | undefined {
   throw new Error(`${flag} must be true or false`);
 }
 
+function parseEasing(value: string | undefined): SceneEasing | undefined {
+  if (value === undefined) return undefined;
+  if (!(SCENE_EASINGS as readonly string[]).includes(value)) throw new Error("Invalid --easing");
+  return value as SceneEasing;
+}
+
+function parseJsonOrFile(
+  args: string[],
+  jsonFlag: string,
+  fileFlag: string,
+  label: string,
+): unknown {
+  const jsonValue = getFlagValue(args, jsonFlag);
+  const fileValue = getFlagValue(args, fileFlag);
+  if (jsonValue !== undefined && fileValue !== undefined) {
+    throw new Error(`Use either ${jsonFlag} or ${fileFlag}`);
+  }
+  if (jsonValue === undefined && fileValue === undefined) {
+    throw new Error(`${jsonFlag} or ${fileFlag} is required`);
+  }
+  try {
+    return JSON.parse(fileValue === undefined ? jsonValue as string : readFileSync(fileValue, "utf8")) as unknown;
+  } catch (error) {
+    throw new Error(`${label} must contain valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function parseActorPoseInput(
+  args: string[],
+  actorHeight: number,
+  presetFlag: "--pose-preset" | "--preset",
+): ActorPose | undefined {
+  const presetValue = getFlagValue(args, presetFlag);
+  const jsonValue = getFlagValue(args, "--pose-json");
+  const fileValue = getFlagValue(args, "--pose-file");
+  const sourceCount = [presetValue, jsonValue, fileValue].filter((value) => value !== undefined).length;
+  if (sourceCount > 1) throw new Error(`Use only one of ${presetFlag}, --pose-json, or --pose-file`);
+  const seatHeight = optionalNumber(args, "--seat-height", VCAMERA_LIMITS.seatHeight.minimum, VCAMERA_LIMITS.seatHeight.maximum);
+  const intensity = optionalNumber(args, "--intensity", VCAMERA_LIMITS.poseIntensity.minimum, VCAMERA_LIMITS.poseIntensity.maximum);
+  const mirror = getFlagValue(args, "--mirror") === undefined
+    ? (hasFlag(args, "--mirror") ? true : undefined)
+    : optionalBoolean(args, "--mirror");
+  if (!sourceCount) {
+    if (seatHeight !== undefined || intensity !== undefined || mirror !== undefined) {
+      throw new Error(`${presetFlag} is required when pose preset parameters are provided`);
+    }
+    return undefined;
+  }
+  if (presetValue !== undefined) {
+    if (!(VCAMERA_ENUMS.actorPosePreset as readonly string[]).includes(presetValue)) {
+      throw new Error(`Invalid ${presetFlag}`);
+    }
+    return resolveActorPosePreset(presetValue as ActorPosePreset, actorHeight, {
+      ...(seatHeight === undefined ? {} : { seatHeight }),
+      ...(intensity === undefined ? {} : { intensity }),
+      ...(mirror === undefined ? {} : { mirror }),
+    });
+  }
+  if (seatHeight !== undefined || intensity !== undefined || mirror !== undefined) {
+    throw new Error("--seat-height, --intensity, and --mirror are only valid with a pose preset");
+  }
+  return normalizeActorPoseValue(parseJsonOrFile(args, "--pose-json", "--pose-file", "actor pose"));
+}
+
 export function vCameraUsage(): string {
   return [
-    "Usage: mir-cli canvas v-camera <capabilities|inspect|create|project|actor|prop|camera|shot|cut> ...",
+    "Usage: mir-cli canvas v-camera <capabilities|inspect|create|scene|project|actor|prop|camera|shot|cut> ...",
     "  capabilities --json: offline, versioned Virtual Shoot parameter contract",
+    "  scene apply --canvas-id <id> --node-id <id> --file <scene.json> [--expected-empty] --dry-run|--yes",
     "  actor/prop/camera: add | set | translate | delete | path add | path set | path update | path delete | path clear",
     "  actor: action add | action set | action delete | action clear",
+    "  actor: pose add | pose set | pose update | pose delete | pose clear",
     "  prop: visibility add | visibility set | visibility delete | visibility clear",
     "  camera: preset --preset <name> --start-time <seconds> --duration <seconds>",
     "  camera: follow | aim are compound helpers; automation should use camera set",

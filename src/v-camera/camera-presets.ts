@@ -7,6 +7,7 @@ import type {
   SceneEasing,
   Vec3,
 } from "./project.js";
+import { applySceneEasing, interpolatePathPosition } from "./path-interpolation.js";
 
 export interface CameraPresetPatchInput {
   preset: CameraMotionPreset;
@@ -41,33 +42,7 @@ function rotateLocalOffset(offset: Vec3, yawDegrees: number): Vec3 {
 }
 
 function getActorPositionAtTime(actor: Actor, time: number): Vec3 {
-  const points = [...actor.pathPoints].sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
-  if (points.length === 0) return [...actor.position];
-  const timeline = points[0].time > 0
-    ? [{ id: "origin", time: 0, position: actor.position }, ...points]
-    : points;
-  if (time <= timeline[0].time) return [...timeline[0].position];
-  const last = timeline.at(-1);
-  if (last && time >= last.time) return [...last.position];
-  for (let index = 0; index < timeline.length - 1; index += 1) {
-    const start = timeline[index];
-    const end = timeline[index + 1];
-    if (time < start.time || time > end.time) continue;
-    const previous = timeline[Math.max(0, index - 1)] ?? start;
-    const next = timeline[Math.min(timeline.length - 1, index + 2)] ?? end;
-    const amount = applyEasing(
-      (time - start.time) / Math.max(0.001, end.time - start.time),
-      end.easing ?? start.easing,
-    );
-    return [0, 1, 2].map((axis) => round(interpolatePathAxis(
-      previous.position[axis],
-      start.position[axis],
-      end.position[axis],
-      next.position[axis],
-      amount,
-    ))) as Vec3;
-  }
-  return [...actor.position];
+  return interpolatePathPosition(actor, time);
 }
 
 function getActorYawAtTime(actor: Actor, time: number) {
@@ -114,30 +89,6 @@ function addScaled(position: Vec3, direction: Vec3, amount: number): Vec3 {
   ];
 }
 
-function applyEasing(amount: number, easing?: SceneEasing) {
-  const value = clamp(amount, 0, 1);
-  if (easing === "linear") return value;
-  if (easing === "ease_in") return value * value;
-  if (easing === "ease_out") return 1 - (1 - value) * (1 - value);
-  if (easing === "ease_in_out") {
-    return value < 0.5 ? 2 * value * value : 1 - ((-2 * value + 2) ** 2) / 2;
-  }
-  return value * value * (3 - 2 * value);
-}
-
-function interpolatePathAxis(p0: number, p1: number, p2: number, p3: number, amount: number) {
-  const velocity0 = (p2 - p0) * 0.5;
-  const velocity1 = (p3 - p1) * 0.5;
-  const t2 = amount * amount;
-  const t3 = t2 * amount;
-  return (
-    (2 * p1 - 2 * p2 + velocity0 + velocity1) * t3
-    + (-3 * p1 + 3 * p2 - 2 * velocity0 - velocity1) * t2
-    + velocity0 * amount
-    + p1
-  );
-}
-
 function createOrbitPoints(
   cameraPosition: Vec3,
   targetPosition: Vec3,
@@ -153,7 +104,7 @@ function createOrbitPoints(
   const startAngle = Math.atan2(offsetZ, offsetX);
   return Array.from({ length: 7 }, (_, index) => {
     const timelineAmount = index / 6;
-    const angle = startAngle + direction * Math.PI * amountScale * applyEasing(timelineAmount, easing);
+    const angle = startAngle + direction * Math.PI * amountScale * applySceneEasing(timelineAmount, easing);
     return makePoint(startTime + duration * timelineAmount, [
       targetPosition[0] + Math.cos(angle) * radius,
       cameraPosition[1],

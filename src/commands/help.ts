@@ -37,13 +37,15 @@ Usage:
   mir-cli canvas v-camera capabilities --json
   mir-cli canvas v-camera create --canvas-id <canvas_id> --yes --json
   mir-cli canvas v-camera inspect --canvas-id <canvas_id> --json
-  mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "Hero" --position "0,0,0" --yes --json
-  mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "Hero" --time 2.125 --position "2,0,4" --yes --json
-  mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "Camera A" --movement-mode path --aim-mode actor --tracking-actor "Hero" --motion-preset orbit_left --yes --json
-  mir-cli canvas v-camera camera preset --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --preset push_in --start-time 8 --duration 5 --yes --json
-  mir-cli canvas v-camera camera path set --canvas-id <canvas_id> --camera "Camera A" --points-json '[{"time":8,"position":[0,1.6,6]},{"time":13,"position":[2,1.6,3],"fov":52}]' --yes --json
-  mir-cli canvas v-camera shot add --canvas-id <canvas_id> --name "S02 Push in" --camera "Camera A" --start-time 8 --duration 5 --yes --json
-  mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera A" --time 4.5 --yes --json
+  mir-cli canvas v-camera scene apply --canvas-id <canvas_id> --node-id <node_id> --file ./scene.json --expected-empty --dry-run --json
+  mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "actor_a" --position "0,0,0" --yes --json
+  mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "actor_a" --time 2.125 --position "2,0,4" --yes --json
+  mir-cli canvas v-camera actor pose add --canvas-id <canvas_id> --actor "actor_a" --time 4.5 --preset raise_hand --intensity 0.8 --yes --json
+  mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "camera_a" --movement-mode path --aim-mode actor --tracking-actor "actor_a" --motion-preset orbit_left --yes --json
+  mir-cli canvas v-camera camera preset --canvas-id <canvas_id> --camera "camera_a" --actor "actor_a" --preset push_in --start-time 8 --duration 5 --yes --json
+  mir-cli canvas v-camera camera path set --canvas-id <canvas_id> --camera "camera_a" --points-json '[{"time":8,"position":[0,1.6,6]},{"time":13,"position":[2,1.6,3],"fov":52}]' --yes --json
+  mir-cli canvas v-camera shot add --canvas-id <canvas_id> --name "shot_02" --camera "camera_a" --start-time 8 --duration 5 --yes --json
+  mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "camera_a" --time 4.5 --yes --json
   mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
 
 Canvas result commands only read completed final media from one explicit canvas. Generation submission remains a manual web action.`);

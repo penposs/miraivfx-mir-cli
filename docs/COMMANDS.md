@@ -93,6 +93,8 @@ mir-cli canvas v-camera capabilities --json
 mir-cli canvas v-camera create --canvas-id <canvas_id> --yes --json
 mir-cli canvas v-camera inspect --canvas-id <canvas_id> --json
 mir-cli canvas v-camera inspect --canvas-id <canvas_id> --node-id <node_id> --json
+mir-cli canvas v-camera scene apply --canvas-id <canvas_id> --node-id <node_id> --file ./virtual-shoot-scene.json --expected-empty --dry-run --json
+mir-cli canvas v-camera scene apply --canvas-id <canvas_id> --node-id <node_id> --file ./virtual-shoot-scene.json --expected-empty --yes --json
 mir-cli canvas node add-v-camera --canvas-id <canvas_id> --yes --json
 ```
 
@@ -100,7 +102,7 @@ mir-cli canvas node add-v-camera --canvas-id <canvas_id> --yes --json
 
 When a canvas contains more than one Virtual Shoot node, pass `--node-id` on every inspect or mutation command.
 
-MIR Virtual Shoot uses one global scene timeline; every path point, shot boundary, and camera cut time is an absolute scene time measured from project second `0`. Entity names may repeat, so automation should retain the stable entity ID returned by each create command and use IDs for later updates.
+MIR Virtual Shoot uses one global scene timeline; every path point, pose keyframe, action marker, visibility keyframe, shot boundary, and camera cut time is an absolute scene time measured from project second `0`. Entity names may repeat, so automation should retain the stable entity ID returned by each create command and use IDs for later updates.
 
 Raw commands are `project set`, actor/prop/camera `add|set|translate|delete|path`, actor `action`, prop `visibility`, `shot`, and `cut`. Raw `set` commands only change explicitly supplied fields. Expected lifecycle effects such as reference cleanup, active-camera selection, and Shot/Cut synchronization are listed under `rawCommandEffects` and returned by affected dry-runs. `camera preset` is the node's public convenience generator; its output is ordinary editable camera fields and global-time keyframes. `camera follow` and `camera aim` are compound helpers whose effects are declared by capabilities. Raw commands remain the unrestricted stable automation interface.
 
@@ -110,7 +112,7 @@ The CLI enforces only the server's basic scene contract:
 - referenced actors, cameras, shots, assets, and path points must exist
 - all timeline values are global seconds from `0` through `3600`
 - path points, shots, and cuts are sorted by global time
-- version 3 rejects duplicate path times within the same entity
+- versions 3 and 4 reject duplicate path times within the same entity
 - a follow or actor-aimed camera needs a tracking actor; point aim needs a look-at point
 - asset props need an owned asset ID; main-timeline shots cannot overlap
 - entity IDs are stable and unique; names are editable and may repeat
@@ -119,6 +121,10 @@ The CLI enforces only the server's basic scene contract:
 ### Virtual Shoot Parameter Reference
 
 Every mutation accepts `--node-id`, `--dry-run`, `--yes`, and `--json`. Use `--node-id` when a canvas contains multiple Virtual Shoot nodes. `--dry-run` and `--yes` are mutually alternative write modes: dry-run prints the patch, while `--yes` authorizes the write.
+
+`scene apply` is the atomic bulk entry point for a complete `VCameraProject` version 4. It requires an explicit `--node-id`, validates schema and references locally, reads the latest canvas revision once, and sends the complete scene through one `POST /canvas/{canvasId}/v-camera` request. It never expands the file into actor, prop, camera, path, shot, or cut commands. `--expected-empty` enables backend `create_only` protection, so a target that became populated after inspection fails with `target_not_empty`. `--dry-run` performs no write and reports the target revision, validation result, field summary, entity counts, pose-keyframe counts, and duration. Scene apply cannot write takes, saved scenes, recordings, media, tasks, results, or billing fields.
+
+The input file must contain all scene fields: `version`, `name`, `fps`, `duration`, `safeFrameRatio`, `cubes`, `actors`, `cameras`, `cameraCuts`, `shots`, and `activeCameraId`. `version` must be the number `4`. Every actor must include canonical `pose` and `poseKeyframes`; every entity and nested item must include each field marked `required` by `capabilities --json`. Scene apply accepts only a canonical project: it rejects implicit numeric coercion, missing required defaults, reordered paths/shots/cuts, zero-time origin rewrites, and a duration that does not already equal the derived scene end. Shot metadata is limited to 50 fields, keys of 1 to 80 characters, and JSON scalar values. Runtime and protected fields may exist in a full project export, but they are not included in the scene patch.
 
 `set --position` changes only the base position and never translates authored path points. Use `actor|prop|camera translate --delta x,y,z` to translate the base and the complete path together. If a zero-time path point exists, it is the canonical initial position; raw position set fails unless `--sync-origin` is explicitly supplied.
 
@@ -149,6 +155,10 @@ Actor fields:
 | both look-at fields | `--clear-look-at` | stores both as `null` |
 | `actionMarkers[]` | `action add --time --action [--target-actor] [--target-point] [--id]` | semantic marker on global time |
 | `actionMarkers[]` | `action set --marker <id> [fields]` | updates one marker without changing its ID |
+| `pose` | `actor add|set --pose-preset <name>` | resolves a generic pose into stable semantic-joint rotations |
+| `pose` | `actor add|set --pose-json <json>` or `--pose-file <file>` | writes a custom canonical pose |
+| `poseKeyframes[]` | `actor pose add --time <seconds> --preset <name> [parameters]` | adds a global-time body-pose keyframe |
+| `poseKeyframes[]` | `actor pose set --points-json <json>` or `--file <file>` | atomically replaces one actor's pose track |
 
 Prop fields:
 
@@ -227,7 +237,7 @@ Camera cut fields are exposed through `cut add/set/delete/clear`: `--id`, `--tim
 Project settings:
 
 ```powershell
-mir-cli canvas v-camera project set --canvas-id <canvas_id> --name "Stage A" --fps 24 --safe-frame 16:9 --active-camera "Camera A" --yes --json
+mir-cli canvas v-camera project set --canvas-id <canvas_id> --name "generic_scene" --fps 24 --safe-frame 16:9 --active-camera "camera_a" --yes --json
 ```
 
 Scene duration is derived from the latest actor, prop, or camera path point and the latest shot/cut time. Empty scenes keep a one-second editing range. `--duration` does not create fixed empty time beyond authored tracks.
@@ -235,23 +245,26 @@ Scene duration is derived from the latest actor, prop, or camera path point and 
 Actors:
 
 ```powershell
-mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "Hero" --position "0,0,0" --rotation "0,0,0" --height 1.75 --yes --json
-mir-cli canvas v-camera actor set --canvas-id <canvas_id> --actor "Hero" --position "2,0,4" --rotation "0,45,0" --yes --json
-mir-cli canvas v-camera actor set --canvas-id <canvas_id> --actor "Hero" --look-at-actor "Partner" --yes --json
-mir-cli canvas v-camera actor action add --canvas-id <canvas_id> --actor "Hero" --time 6.5 --action turn_head --target-actor "Partner" --yes --json
-mir-cli canvas v-camera actor action set --canvas-id <canvas_id> --actor "Hero" --marker <marker_id> --time 6.75 --clear-targets --yes --json
-mir-cli canvas v-camera actor translate --canvas-id <canvas_id> --actor "Hero" --delta "2,0,1" --yes --json
-mir-cli canvas v-camera actor delete --canvas-id <canvas_id> --actor "Hero" --yes --json
+mir-cli canvas v-camera actor add --canvas-id <canvas_id> --name "actor_a" --position "0,0,0" --rotation "0,0,0" --height 1.75 --yes --json
+mir-cli canvas v-camera actor set --canvas-id <canvas_id> --actor "actor_a" --position "2,0,4" --rotation "0,45,0" --yes --json
+mir-cli canvas v-camera actor set --canvas-id <canvas_id> --actor "actor_a" --look-at-actor "actor_b" --yes --json
+mir-cli canvas v-camera actor action add --canvas-id <canvas_id> --actor "actor_a" --time 6.5 --action turn_head --target-actor "actor_b" --yes --json
+mir-cli canvas v-camera actor action set --canvas-id <canvas_id> --actor "actor_a" --marker <marker_id> --time 6.75 --clear-targets --yes --json
+mir-cli canvas v-camera actor set --canvas-id <canvas_id> --actor "actor_a" --pose-preset sit_hands_on_thighs --seat-height 0.45 --yes --json
+mir-cli canvas v-camera actor pose add --canvas-id <canvas_id> --actor "actor_a" --time 4.5 --preset raise_hand --intensity 0.8 --mirror false --easing smooth --yes --json
+mir-cli canvas v-camera actor pose update --canvas-id <canvas_id> --actor "actor_a" --point <pose_keyframe_id> --time 4.75 --preset support_chin --yes --json
+mir-cli canvas v-camera actor translate --canvas-id <canvas_id> --actor "actor_a" --delta "2,0,1" --yes --json
+mir-cli canvas v-camera actor delete --canvas-id <canvas_id> --actor "actor_a" --yes --json
 ```
 
 Props:
 
 ```powershell
-mir-cli canvas v-camera prop add --canvas-id <canvas_id> --preset thin_wall --name "Back wall" --position "0,0.85,-3" --scale "4,1.7,0.12" --yes --json
-mir-cli canvas v-camera prop add --canvas-id <canvas_id> --asset-id <uploaded_model_asset_id> --name "Hero car" --position "4,0,2" --yes --json
+mir-cli canvas v-camera prop add --canvas-id <canvas_id> --preset thin_wall --name "platform_a" --position "0,0.85,-3" --scale "4,1.7,0.12" --yes --json
+mir-cli canvas v-camera prop add --canvas-id <canvas_id> --asset-id <uploaded_model_asset_id> --name "seat_proxy" --position "4,0,2" --yes --json
 mir-cli canvas v-camera prop set --canvas-id <canvas_id> --prop "Back wall" --rotation "0,45,0" --visible true --locked false --preset thin_wall --source-type primitive --yes --json
-mir-cli canvas v-camera prop visibility add --canvas-id <canvas_id> --prop "Hero car" --time 12.5 --visible false --yes --json
-mir-cli canvas v-camera prop visibility set --canvas-id <canvas_id> --prop "Hero car" --keyframe <keyframe_id> --time 13 --visible true --yes --json
+mir-cli canvas v-camera prop visibility add --canvas-id <canvas_id> --prop "seat_proxy" --time 12.5 --visible false --yes --json
+mir-cli canvas v-camera prop visibility set --canvas-id <canvas_id> --prop "seat_proxy" --keyframe <keyframe_id> --time 13 --visible true --yes --json
 mir-cli canvas v-camera prop delete --canvas-id <canvas_id> --prop "Back wall" --yes --json
 ```
 
@@ -260,14 +273,14 @@ Supported prop presets are `box`, `thin_wall`, `column`, `platform`, `obstacle`,
 Cameras:
 
 ```powershell
-mir-cli canvas v-camera camera add --canvas-id <canvas_id> --name "Camera A" --position "0,1.6,6" --rotation "0,180,0" --fov 35 --duration 8 --yes --json
-mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "Camera A" --position "1,1.8,5" --fov 45 --movement-mode path --aim-mode actor --tracking-actor "Hero" --tracking-point head --motion-preset push_in --yes --json
-mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "Camera A" --movement-mode follow --aim-mode actor --tracking-actor "Hero" --follow-offset "0,1.6,3" --follow-speed 6 --yes --json
-mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "Camera A" --aim-mode point --look-at-point "0,1.5,0" --yes --json
-mir-cli canvas v-camera camera aim --canvas-id <canvas_id> --camera "Camera A" --point "0,1.5,0" --yes --json
-mir-cli canvas v-camera camera follow --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --tracking-point chest --offset "0,1.6,3" --speed 6 --yes --json
-mir-cli canvas v-camera camera preset --canvas-id <canvas_id> --camera "Camera A" --actor "Hero" --preset push_in --start-time 8 --duration 5 --easing smooth --yes --json
-mir-cli canvas v-camera camera delete --canvas-id <canvas_id> --camera "Camera A" --yes --json
+mir-cli canvas v-camera camera add --canvas-id <canvas_id> --name "camera_a" --position "0,1.6,6" --rotation "0,180,0" --fov 35 --duration 8 --yes --json
+mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "camera_a" --position "1,1.8,5" --fov 45 --movement-mode path --aim-mode actor --tracking-actor "actor_a" --tracking-point head --motion-preset push_in --yes --json
+mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "camera_a" --movement-mode follow --aim-mode actor --tracking-actor "actor_a" --follow-offset "0,1.6,3" --follow-speed 6 --yes --json
+mir-cli canvas v-camera camera set --canvas-id <canvas_id> --camera "camera_a" --aim-mode point --look-at-point "0,1.5,0" --yes --json
+mir-cli canvas v-camera camera aim --canvas-id <canvas_id> --camera "camera_a" --point "0,1.5,0" --yes --json
+mir-cli canvas v-camera camera follow --canvas-id <canvas_id> --camera "camera_a" --actor "actor_a" --tracking-point chest --offset "0,1.6,3" --speed 6 --yes --json
+mir-cli canvas v-camera camera preset --canvas-id <canvas_id> --camera "camera_a" --actor "actor_a" --preset push_in --start-time 8 --duration 5 --easing smooth --yes --json
+mir-cli canvas v-camera camera delete --canvas-id <canvas_id> --camera "camera_a" --yes --json
 ```
 
 Accepted `--motion-preset` metadata values are `push_in`, `pull_out`, `truck_left`, `truck_right`, `fixed_tracking`, `lead_follow`, `chase_follow`, `orbit_left`, `orbit_right`, `crane_up`, `crane_down`, `pan_left`, `pan_right`, `tilt_up`, `tilt_down`, `zoom_in`, `zoom_out`, `dolly_zoom_in`, and `dolly_zoom_out`. Use `none` to clear the field. Setting this field alone remains metadata-only.
@@ -281,21 +294,21 @@ Movement, timing, framing, and easing are supplied as exact camera fields and ke
 Actor, prop, and camera paths share the same commands:
 
 ```powershell
-mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "Hero" --time 2.125 --position "2,0,4" --yaw 45 --yes --json
+mir-cli canvas v-camera actor path add --canvas-id <canvas_id> --actor "actor_a" --time 2.125 --position "2,0,4" --yaw 45 --yes --json
 mir-cli canvas v-camera prop path add --canvas-id <canvas_id> --prop "Platform 1" --time 6 --position "2,0.5,3" --rotation "0,45,0" --easing smooth --yes --json
-mir-cli canvas v-camera camera path set --canvas-id <canvas_id> --camera "Camera A" --points-json '[{"time":8,"position":[0,1.6,6],"fov":35},{"time":13,"position":[2,1.6,3],"rotation":[0,12,0],"fov":52,"focusDistance":6,"easing":"ease_out"}]' --yes --json
-mir-cli canvas v-camera camera path update --canvas-id <canvas_id> --camera "Camera A" --point <point_id> --time 13.125 --fov 48 --clear-focus-distance --yes --json
+mir-cli canvas v-camera camera path set --canvas-id <canvas_id> --camera "camera_a" --points-json '[{"time":8,"position":[0,1.6,6],"fov":35},{"time":13,"position":[2,1.6,3],"rotation":[0,12,0],"fov":52,"focusDistance":6,"easing":"ease_out"}]' --yes --json
+mir-cli canvas v-camera camera path update --canvas-id <canvas_id> --camera "camera_a" --point <point_id> --time 13.125 --fov 48 --clear-focus-distance --yes --json
 mir-cli canvas v-camera prop path delete --canvas-id <canvas_id> --prop "Platform 1" --point <point_id> --yes --json
-mir-cli canvas v-camera actor path clear --canvas-id <canvas_id> --actor "Hero" --yes --json
+mir-cli canvas v-camera actor path clear --canvas-id <canvas_id> --actor "actor_a" --yes --json
 ```
 
-`path set --points-json` always accepts absolute scene times. It never converts global times to camera-local or shot-local times. Version 3 rejects duplicate times within one entity path.
+Position paths use bounded piecewise eased-linear interpolation. Easing changes only segment time progress; it cannot overshoot endpoint coordinates, stationary axes remain exact, and the final keyframe is held exactly. `path set --points-json` always accepts absolute scene times. It never converts global times to camera-local or shot-local times. Versions 3 and 4 reject duplicate times within one entity path.
 
 Shots:
 
 ```powershell
-mir-cli canvas v-camera shot add --canvas-id <canvas_id> --name "S02 Push in" --camera "Camera B" --start-time 8 --duration 5 --metadata-json '{"scriptRef":"S02"}' --yes --json
-mir-cli canvas v-camera shot set --canvas-id <canvas_id> --shot "S02 Push in" --start-time 8.5 --end-time 13.5 --camera "Camera C" --yes --json
+mir-cli canvas v-camera shot add --canvas-id <canvas_id> --name "shot_02" --camera "camera_b" --start-time 8 --duration 5 --metadata-json '{"scriptRef":"shot_02"}' --yes --json
+mir-cli canvas v-camera shot set --canvas-id <canvas_id> --shot "shot_02" --start-time 8.5 --end-time 13.5 --camera "camera_c" --yes --json
 mir-cli canvas v-camera shot delete --canvas-id <canvas_id> --shot <shot_id> --yes --json
 ```
 
@@ -304,10 +317,10 @@ Shots are persisted scene-timeline ranges. Adding or changing a shot synchronize
 Camera cuts:
 
 ```powershell
-mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera A" --time 4.5 --yes --json
-mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "Camera B" --actor "Hero" --point <path_point_id> --yes --json
-mir-cli canvas v-camera cut set --canvas-id <canvas_id> --cut <cut_id> --time 7.25 --camera "Camera C" --yes --json
-mir-cli canvas v-camera cut set --canvas-id <canvas_id> --cut <cut_id> --actor "Hero" --point <path_point_id> --yes --json
+mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "camera_a" --time 4.5 --yes --json
+mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "camera_b" --actor "actor_a" --point <path_point_id> --yes --json
+mir-cli canvas v-camera cut set --canvas-id <canvas_id> --cut <cut_id> --time 7.25 --camera "camera_c" --yes --json
+mir-cli canvas v-camera cut set --canvas-id <canvas_id> --cut <cut_id> --actor "actor_a" --point <path_point_id> --yes --json
 mir-cli canvas v-camera cut set --canvas-id <canvas_id> --cut <cut_id> --clear-anchor --time 8 --yes --json
 mir-cli canvas v-camera cut delete --canvas-id <canvas_id> --cut <cut_id> --yes --json
 mir-cli canvas v-camera cut clear --canvas-id <canvas_id> --yes --json
