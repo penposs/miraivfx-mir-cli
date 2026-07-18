@@ -79,6 +79,8 @@ mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Shot note
 
 `canvas group add` derives the visual bounds from its member nodes unless `--x`, `--y`, `--width`, and `--height` are supplied. Optional fields are `--group-id`, `--color`, and `--collapsed`. Group writes use the inspected canvas revision and fail on concurrent changes. `node add --group-title` sends `add_node` and `add_group` in one `/ops` request; optional `--group-with` accepts a comma-separated list and may be repeated. The JSON result contains `group_id`, `members`, and the resulting `revision`.
 
+For these atomic group writes only, an HTTP 5xx response triggers one read-only canvas verification and never a mutation retry. mir-cli checks the pre-generated node/group IDs; persisted IDs return `response_status: "committed_with_response_error"`, while missing IDs remain a command failure.
+
 Supported node types are reported by `mir-cli canvas capabilities --json`.
 When `--x`/`--y` are omitted, the CLI picks a non-overlapping position from the current canvas. `add-reference-image` reuses an existing material node with the same URL by default; use `--force-new` or `--duplicate` only when a second visible copy is intentional.
 Use `add-suno` for music or song generation. It accepts `--lyrics`, `--song-title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, and `--instrumental`, and maps them to the Suno node fields used by the web canvas.

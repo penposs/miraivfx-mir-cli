@@ -15,6 +15,7 @@ import {
 } from "../dist/v-camera/project.js";
 import { handleVCameraCommand } from "../dist/commands/v-camera.js";
 import { addCanvasGroup, addGenericNode } from "../dist/commands/canvas.js";
+import { ApiHttpError } from "../dist/api/client.js";
 import { createCameraPresetPatch } from "../dist/v-camera/camera-presets.js";
 import {
   createNeutralActorPose,
@@ -159,6 +160,174 @@ test("node add with group title submits add_node and add_group atomically", asyn
   assert.equal(result.group_id, requests[0].body.ops[1].group.id);
   assert.deepEqual(result.members, [createdNode.id, "existing-node"]);
   assert.equal(result.revision, 13);
+});
+
+test("canvas group add confirms a committed write after a 5xx without retrying", async () => {
+  const requests = [];
+  let reads = 0;
+  const originalNodes = [
+    { id: "node-a", x: 100, y: 200, width: 280, height: 180 },
+    { id: "node-b", x: 500, y: 240, width: 320, height: 200 },
+  ];
+  const api = {
+    async getJson() {
+      reads += 1;
+      const response = canvasWithNodes(originalNodes, reads === 1 ? 436 : 437);
+      if (reads > 1) response.data.groups = [requests[0].body.ops[0].group];
+      return response;
+    },
+    async postJson(path, body) {
+      requests.push({ path, body });
+      throw new ApiHttpError(500, "response serialization failed");
+    },
+  };
+
+  const result = await addCanvasGroup(api, [
+    "--canvas-id", "canvas-1",
+    "--node-ids", "node-a,node-b",
+    "--title", "Shot 01",
+    "--yes",
+  ]);
+
+  assert.equal(requests.length, 1);
+  assert.equal(reads, 2);
+  assert.equal(result.response_status, "committed_with_response_error");
+  assert.equal(result.response_error_status, 500);
+  assert.equal(result.group_id, requests[0].body.ops[0].group.id);
+  assert.equal(result.revision, 437);
+  assert.match(result.message, /Commit succeeded.*response was abnormal/i);
+});
+
+test("node and group add confirms both generated IDs after a 5xx without retrying", async () => {
+  const requests = [];
+  let reads = 0;
+  const existingNode = { id: "existing-node", x: 0, y: 0, width: 280, height: 180 };
+  const api = {
+    async getJson() {
+      reads += 1;
+      if (reads === 1) return canvasWithNodes([existingNode], 12);
+      const node = requests[0].body.ops.find((op) => op.type === "add_node").node;
+      const group = requests[0].body.ops.find((op) => op.type === "add_group").group;
+      const response = canvasWithNodes([existingNode, node], 13);
+      response.data.groups = [group];
+      return response;
+    },
+    async postJson(path, body) {
+      requests.push({ path, body });
+      throw new ApiHttpError(503, "upstream response failed");
+    },
+  };
+
+  const result = await addGenericNode(api, [
+    "--canvas-id", "canvas-1",
+    "--type", "text",
+    "--content", "Shot note",
+    "--x", "400",
+    "--y", "240",
+    "--group-title", "Shot 01",
+    "--group-with", "existing-node",
+    "--yes",
+  ], "https://miraivfx.art");
+
+  assert.equal(requests.length, 1);
+  assert.equal(reads, 2);
+  assert.equal(result.response_status, "committed_with_response_error");
+  assert.equal(result.response_error_status, 503);
+  assert.equal(result.node_id, requests[0].body.ops[0].node.id);
+  assert.equal(result.group_id, requests[0].body.ops.at(-1).group.id);
+  assert.equal(result.revision, 13);
+});
+
+test("atomic group write remains failed when generated IDs are absent after a 5xx", async () => {
+  let reads = 0;
+  let writes = 0;
+  const api = {
+    async getJson() {
+      reads += 1;
+      return canvasWithNodes([
+        { id: "node-a", x: 0, y: 0, width: 280, height: 180 },
+      ], 436);
+    },
+    async postJson() {
+      writes += 1;
+      throw new ApiHttpError(502, "bad gateway");
+    },
+  };
+
+  await assert.rejects(
+    addCanvasGroup(api, [
+      "--canvas-id", "canvas-1",
+      "--node-id", "node-a",
+      "--yes",
+    ]),
+    /HTTP 502/,
+  );
+  assert.equal(writes, 1);
+  assert.equal(reads, 2);
+});
+
+test("canvas group add rejects a pre-existing explicit group ID before writing", async () => {
+  let writes = 0;
+  const api = {
+    async getJson() {
+      const response = canvasWithNodes([
+        { id: "node-a", x: 0, y: 0, width: 280, height: 180 },
+      ], 436);
+      response.data.groups = [{ id: "existing-group", nodeIds: ["node-a"] }];
+      return response;
+    },
+    async postJson() {
+      writes += 1;
+      throw new Error("must not write");
+    },
+  };
+
+  await assert.rejects(
+    addCanvasGroup(api, [
+      "--canvas-id", "canvas-1",
+      "--node-id", "node-a",
+      "--group-id", "existing-group",
+      "--yes",
+    ]),
+    /group ID already exists before write/,
+  );
+  assert.equal(writes, 0);
+});
+
+test("5xx verification rejects a matching group ID with different members", async () => {
+  const requests = [];
+  let reads = 0;
+  const api = {
+    async getJson() {
+      reads += 1;
+      const response = canvasWithNodes([
+        { id: "node-a", x: 0, y: 0, width: 280, height: 180 },
+        { id: "node-b", x: 300, y: 0, width: 280, height: 180 },
+      ], reads === 1 ? 436 : 437);
+      if (reads > 1) {
+        response.data.groups = [{
+          ...requests[0].body.ops[0].group,
+          nodeIds: ["node-b"],
+        }];
+      }
+      return response;
+    },
+    async postJson(path, body) {
+      requests.push({ path, body });
+      throw new ApiHttpError(500, "response failed");
+    },
+  };
+
+  await assert.rejects(
+    addCanvasGroup(api, [
+      "--canvas-id", "canvas-1",
+      "--node-id", "node-a",
+      "--yes",
+    ]),
+    /HTTP 500/,
+  );
+  assert.equal(requests.length, 1);
+  assert.equal(reads, 2);
 });
 
 test("strict group writes refuse to run when inspect omits the canvas revision", async () => {

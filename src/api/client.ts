@@ -3,6 +3,16 @@ export interface ApiClientOptions {
   token?: string;
 }
 
+export class ApiHttpError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly detail = "",
+  ) {
+    super(`Request failed: HTTP ${status}${detail ? ` - ${detail}` : ""}`);
+    this.name = "ApiHttpError";
+  }
+}
+
 export class ApiClient {
   constructor(private readonly options: ApiClientOptions) {}
 
@@ -78,7 +88,7 @@ export class ApiClient {
   }
 }
 
-async function requestError(response: Response): Promise<Error> {
+async function requestError(response: Response): Promise<ApiHttpError> {
   let detail = "";
   try {
     const payload = await response.json() as Record<string, unknown>;
@@ -91,5 +101,5 @@ async function requestError(response: Response): Promise<Error> {
   } catch {
     detail = "";
   }
-  return new Error(`Request failed: HTTP ${response.status}${detail ? ` - ${detail}` : ""}`);
+  return new ApiHttpError(response.status, detail);
 }

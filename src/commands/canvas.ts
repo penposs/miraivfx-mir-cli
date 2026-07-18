@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { getFlagValue, hasFlag } from "../core/args.js";
-import { ApiClient } from "../api/client.js";
+import { ApiClient, ApiHttpError } from "../api/client.js";
 import { loadRuntimeConfig } from "../core/config.js";
 import { openUrl } from "../core/open.js";
 import { json, text } from "../core/output.js";
@@ -172,7 +172,9 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
         ? json(result)
         : text(result.dry_run
           ? `Dry run: would add V-camera node ${result.node_id} to ${result.canvas_id}`
-          : `Added V-camera node ${result.node_id} to ${result.canvas_id}`);
+          : typeof result.message === "string"
+            ? result.message
+            : `Added V-camera node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
     if (!action) {
@@ -195,7 +197,9 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
         ? json(result)
         : text(result.dry_run
           ? `Dry run: would add ${result.node_type} node ${result.node_id} to ${result.canvas_id}`
-          : `Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
+          : typeof result.message === "string"
+            ? result.message
+            : `Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
     if (action === "connect") {
@@ -249,7 +253,9 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
         ? json(result)
         : text(result.dry_run
           ? `Dry run: would add ${result.node_type} node ${result.node_id} to ${result.canvas_id}`
-          : `Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
+          : typeof result.message === "string"
+            ? result.message
+            : `Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
     text("Usage: mir-cli canvas node <add|update|clone|delete|connect|disconnect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-vibex|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d|add-v-camera>");
@@ -265,7 +271,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
         ? json(result)
         : text(result.dry_run
           ? `Dry run: would add group ${result.group_id} with ${result.members.length} member(s)`
-          : `Added group ${result.group_id} with ${result.members.length} member(s)`);
+          : result.message ?? `Added group ${result.group_id} with ${result.members.length} member(s)`);
       return;
     }
     text("Usage: mir-cli canvas group add --canvas-id <canvas_id> --node-ids <id,id,...> [--title <title>] <--dry-run|--yes> [--json]");
@@ -675,6 +681,7 @@ export async function addCanvasGroup(api: ApiClient, args: string[]): Promise<Ca
     height: parseOptionalNumber(getFlagValue(args, "--height"), "--height"),
     collapsed: hasFlag(args, "--collapsed"),
   });
+  assertCanvasIdsWereAbsent(canvas, { groupId: group.id });
   const ops = [{ type: "add_group", group }];
 
   if (dryRun) {
@@ -691,12 +698,35 @@ export async function addCanvasGroup(api: ApiClient, args: string[]): Promise<Ca
   }
 
   const now = Date.now();
-  const update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
-    baseRevision,
-    conflictPolicy: "strict",
-    clientModifiedAt: now,
-    ops,
-  });
+  let update: CanvasOpsResponse;
+  try {
+    update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
+      baseRevision,
+      conflictPolicy: "strict",
+      clientModifiedAt: now,
+      ops,
+    });
+  } catch (error) {
+    const confirmed = await confirmAtomicCanvasWriteAfterServerError(api, canvasId, error, {
+      groupId: group.id,
+      memberIds: group.nodeIds,
+    });
+    return {
+      ok: true,
+      dry_run: false,
+      canvas_id: canvasId,
+      project_id: confirmed.canvas.project_id,
+      group_id: group.id,
+      members: group.nodeIds,
+      group: confirmed.group ?? group,
+      revision: confirmed.canvas.revision,
+      clientModifiedAt: confirmed.canvas.clientModifiedAt,
+      ops,
+      response_status: "committed_with_response_error",
+      response_error_status: confirmed.status,
+      message: confirmed.message,
+    };
+  }
   if (!update.success) {
     throw new Error(update.error ?? "Failed to add canvas group");
   }
@@ -817,6 +847,9 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
       )
     : undefined;
   const baseRevision = group ? requireCanvasRevision(canvas) : undefined;
+  if (group && canvas) {
+    assertCanvasIdsWereAbsent(canvas, { nodeId: node.id, groupId: group.id });
+  }
   const ops = [
     { type: "add_node", node },
     ...(connection ? [connection] : []),
@@ -845,12 +878,49 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
     };
   }
 
-  const update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
-    ...(baseRevision !== undefined ? { baseRevision } : {}),
-    conflictPolicy: group ? "strict" : "merge",
-    clientModifiedAt: now,
-    ops,
-  });
+  let update: CanvasOpsResponse;
+  try {
+    update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
+      ...(baseRevision !== undefined ? { baseRevision } : {}),
+      conflictPolicy: group ? "strict" : "merge",
+      clientModifiedAt: now,
+      ops,
+    });
+  } catch (error) {
+    if (!group) throw error;
+    const confirmed = await confirmAtomicCanvasWriteAfterServerError(api, canvasId, error, {
+      nodeId: node.id,
+      groupId: group.id,
+      memberIds: group.nodeIds,
+    });
+    const projectId = requireValue(confirmed.canvas.project_id, "verified canvas project_id");
+    const url = `${appBase}/canvas?projectId=${encodeURIComponent(projectId)}&canvasId=${encodeURIComponent(canvasId)}`;
+    return {
+      ok: true,
+      canvas_id: canvasId,
+      project_id: projectId,
+      url,
+      opened: shouldOpen,
+      node_id: node.id,
+      node_type: node.type,
+      x,
+      y,
+      width,
+      height,
+      layout: { x, y, width, height },
+      title,
+      status,
+      connected_to: connectTo ?? null,
+      group_id: group.id,
+      members: group.nodeIds,
+      revision: confirmed.canvas.revision,
+      clientModifiedAt: confirmed.canvas.clientModifiedAt,
+      generation_started: false,
+      response_status: "committed_with_response_error",
+      response_error_status: confirmed.status,
+      message: confirmed.message,
+    };
+  }
 
   if (!update.success) {
     throw new Error(update.error ?? "Failed to apply canvas ops");
@@ -1264,6 +1334,66 @@ async function getCanvasData(api: ApiClient, canvasId: string): Promise<CanvasDa
     throw new Error(response.error ?? "Canvas not found");
   }
   return response.data;
+}
+
+async function confirmAtomicCanvasWriteAfterServerError(
+  api: ApiClient,
+  canvasId: string,
+  error: unknown,
+  expected: { nodeId?: string; groupId: string; memberIds: string[] },
+): Promise<{
+  canvas: CanvasData;
+  group?: Record<string, unknown>;
+  status: number;
+  message: string;
+}> {
+  if (!(error instanceof ApiHttpError) || error.status < 500 || error.status > 599) {
+    throw error;
+  }
+
+  let canvas: CanvasData;
+  try {
+    canvas = await getCanvasData(api, canvasId);
+  } catch {
+    throw error;
+  }
+
+  const nodeExists = !expected.nodeId || canvas.nodes.some(
+    (node) => node && typeof node === "object" && String((node as Record<string, unknown>).id || "") === expected.nodeId,
+  );
+  const group = (canvas.groups ?? []).find(
+    (item) => item && typeof item === "object" && String((item as Record<string, unknown>).id || "") === expected.groupId,
+  );
+  const persistedMemberIds = group && typeof group === "object" && Array.isArray((group as Record<string, unknown>).nodeIds)
+    ? ((group as Record<string, unknown>).nodeIds as unknown[]).map((value) => String(value))
+    : [];
+  const expectedMemberIds = [...expected.memberIds].sort();
+  const membersMatch = persistedMemberIds.length === expectedMemberIds.length
+    && [...persistedMemberIds].sort().every((value, index) => value === expectedMemberIds[index]);
+  if (!nodeExists || !group || typeof group !== "object" || !membersMatch) {
+    throw error;
+  }
+
+  return {
+    canvas,
+    group: group as Record<string, unknown>,
+    status: error.status,
+    message: `Commit succeeded, but the server response was abnormal (HTTP ${error.status}); canvas state was verified by ID.`,
+  };
+}
+
+function assertCanvasIdsWereAbsent(
+  canvas: CanvasData,
+  expected: { nodeId?: string; groupId?: string },
+): void {
+  const nodeExists = expected.nodeId && canvas.nodes.some(
+    (node) => node && typeof node === "object" && String((node as Record<string, unknown>).id || "") === expected.nodeId,
+  );
+  const groupExists = expected.groupId && (canvas.groups ?? []).some(
+    (group) => group && typeof group === "object" && String((group as Record<string, unknown>).id || "") === expected.groupId,
+  );
+  if (nodeExists) throw new Error(`Generated node ID already exists before write: ${expected.nodeId}`);
+  if (groupExists) throw new Error(`Generated group ID already exists before write: ${expected.groupId}`);
 }
 
 function findCanvasNode(canvas: CanvasData, nodeId: string): Record<string, unknown> {
@@ -2096,6 +2226,9 @@ interface CanvasGroupMutationResult {
   revision?: number;
   clientModifiedAt?: number;
   ops: Array<Record<string, unknown>>;
+  response_status?: "committed_with_response_error";
+  response_error_status?: number;
+  message?: string;
 }
 
 interface NodeRect {

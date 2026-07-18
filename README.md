@@ -140,6 +140,8 @@ mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Shot note
 
 `canvas group add` uses strict revision protection. `node add --group-title` submits `add_node` and `add_group` in the same `/ops` request, so a failed member reference cannot leave a partial node or group behind. Use `--dry-run` instead of `--yes` to inspect the exact operations without writing.
 
+If that atomic request returns HTTP 5xx, mir-cli never retries the mutation. It reads the canvas once and checks the pre-generated node and group IDs. When both persisted IDs are present, the command reports `committed_with_response_error`; otherwise it remains failed.
+
 Add a video generation node:
 
 ```powershell
