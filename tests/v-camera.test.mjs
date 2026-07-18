@@ -14,6 +14,7 @@ import {
   resolveByIdOrName,
 } from "../dist/v-camera/project.js";
 import { handleVCameraCommand } from "../dist/commands/v-camera.js";
+import { addCanvasGroup, addGenericNode } from "../dist/commands/canvas.js";
 import { createCameraPresetPatch } from "../dist/v-camera/camera-presets.js";
 import {
   createNeutralActorPose,
@@ -55,6 +56,137 @@ const camera = {
   followSpeed: 6,
   motionPreset: null,
 };
+
+function canvasWithNodes(nodes, revision = 436) {
+  return {
+    success: true,
+    data: {
+      id: "canvas-1",
+      project_id: "project-1",
+      name: "Canvas",
+      nodes,
+      connections: [],
+      groups: [],
+      revision,
+      clientModifiedAt: 1,
+    },
+  };
+}
+
+test("canvas group add sends one strict add_group operation and returns server identity", async () => {
+  const requests = [];
+  const api = {
+    async getJson() {
+      return canvasWithNodes([
+        { id: "node-a", x: 100, y: 200, width: 280, height: 180 },
+        { id: "node-b", x: 500, y: 240, width: 320, height: 200 },
+      ]);
+    },
+    async postJson(path, body) {
+      requests.push({ path, body });
+      return {
+        success: true,
+        data: {
+          project_id: "project-1",
+          revision: 437,
+          group_id: "server-group",
+          members: ["node-a", "node-b"],
+          groups: [{ ...body.ops[0].group, id: "server-group" }],
+        },
+      };
+    },
+  };
+
+  const result = await addCanvasGroup(api, [
+    "--canvas-id", "canvas-1",
+    "--node-ids", "node-a,node-b",
+    "--title", "Shot 01",
+    "--yes",
+  ]);
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].path, "/canvas/canvas-1/ops");
+  assert.equal(requests[0].body.baseRevision, 436);
+  assert.equal(requests[0].body.conflictPolicy, "strict");
+  assert.deepEqual(requests[0].body.ops.map((op) => op.type), ["add_group"]);
+  assert.deepEqual(requests[0].body.ops[0].group.nodeIds, ["node-a", "node-b"]);
+  assert.equal(result.group_id, "server-group");
+  assert.deepEqual(result.members, ["node-a", "node-b"]);
+  assert.equal(result.revision, 437);
+});
+
+test("node add with group title submits add_node and add_group atomically", async () => {
+  const requests = [];
+  const api = {
+    async getJson() {
+      return canvasWithNodes([
+        { id: "existing-node", x: 0, y: 0, width: 280, height: 180 },
+      ], 12);
+    },
+    async postJson(path, body) {
+      requests.push({ path, body });
+      const group = body.ops.find((op) => op.type === "add_group").group;
+      return {
+        success: true,
+        data: {
+          project_id: "project-1",
+          revision: 13,
+          group_id: group.id,
+          members: group.nodeIds,
+          groups: [group],
+        },
+      };
+    },
+  };
+
+  const result = await addGenericNode(api, [
+    "--canvas-id", "canvas-1",
+    "--type", "text",
+    "--content", "Shot note",
+    "--x", "400",
+    "--y", "240",
+    "--group-title", "Shot 01",
+    "--group-with", "existing-node",
+    "--yes",
+  ], "https://miraivfx.art");
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].body.baseRevision, 12);
+  assert.equal(requests[0].body.conflictPolicy, "strict");
+  assert.deepEqual(requests[0].body.ops.map((op) => op.type), ["add_node", "add_group"]);
+  const createdNode = requests[0].body.ops[0].node;
+  assert.deepEqual(requests[0].body.ops[1].group.nodeIds, [createdNode.id, "existing-node"]);
+  assert.equal(result.group_id, requests[0].body.ops[1].group.id);
+  assert.deepEqual(result.members, [createdNode.id, "existing-node"]);
+  assert.equal(result.revision, 13);
+});
+
+test("strict group writes refuse to run when inspect omits the canvas revision", async () => {
+  let requestCount = 0;
+  const api = {
+    async getJson() {
+      const response = canvasWithNodes([
+        { id: "node-a", x: 0, y: 0, width: 280, height: 180 },
+      ]);
+      delete response.data.revision;
+      return response;
+    },
+    async postJson() {
+      requestCount += 1;
+      return { success: true };
+    },
+  };
+
+  await assert.rejects(
+    addCanvasGroup(api, [
+      "--canvas-id", "canvas-1",
+      "--node-id", "node-a",
+      "--yes",
+    ]),
+    /missing a valid revision/,
+  );
+  assert.equal(requestCount, 0);
+});
 
 test("default project starts with editable V-camera collections", () => {
   const project = defaultVCameraProject();

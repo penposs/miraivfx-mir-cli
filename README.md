@@ -131,6 +131,15 @@ Add a text note:
 mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Planning note" --yes --json
 ```
 
+Group existing nodes, or create a node and its group in one atomic canvas revision:
+
+```powershell
+mir-cli canvas group add --canvas-id <canvas_id> --node-ids <node_a>,<node_b> --title "Shot 01" --yes --json
+mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Shot note" --group-title "Shot 01" --group-with <existing_node_id> --yes --json
+```
+
+`canvas group add` uses strict revision protection. `node add --group-title` submits `add_node` and `add_group` in the same `/ops` request, so a failed member reference cannot leave a partial node or group behind. Use `--dry-run` instead of `--yes` to inspect the exact operations without writing.
+
 Add a video generation node:
 
 ```powershell

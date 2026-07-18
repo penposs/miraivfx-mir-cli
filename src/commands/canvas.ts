@@ -256,13 +256,29 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
     return;
   }
 
+  if (subcommand === "group") {
+    const action = args[0] ?? "";
+    const rest = args.slice(1);
+    if (action === "add") {
+      const result = await addCanvasGroup(api, rest);
+      asJson
+        ? json(result)
+        : text(result.dry_run
+          ? `Dry run: would add group ${result.group_id} with ${result.members.length} member(s)`
+          : `Added group ${result.group_id} with ${result.members.length} member(s)`);
+      return;
+    }
+    text("Usage: mir-cli canvas group add --canvas-id <canvas_id> --node-ids <id,id,...> [--title <title>] <--dry-run|--yes> [--json]");
+    return;
+  }
+
   if (["plan", "deploy", "run"].includes(subcommand)) {
     const payload = manualWebOnlyPayload(`canvas ${subcommand}`);
     asJson ? json(payload) : text(payload.message);
     return;
   }
 
-  text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|node|v-camera>");
+  text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|node|group|v-camera>");
 }
 
 const CANVAS_NODE_TYPES = new Set([
@@ -570,6 +586,7 @@ function summarizeCanvas(canvas: CanvasData): Record<string, unknown> {
     name: canvas.name,
     node_count: canvas.nodes?.length ?? 0,
     connection_count: canvas.connections?.length ?? 0,
+    group_count: canvas.groups?.length ?? 0,
     node_type_counts: nodeTypeCounts,
     revision: canvas.revision ?? 0,
     clientModifiedAt: canvas.clientModifiedAt ?? 0,
@@ -577,7 +594,130 @@ function summarizeCanvas(canvas: CanvasData): Record<string, unknown> {
   };
 }
 
-async function addGenericNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
+function requireCanvasRevision(canvas: CanvasData | undefined): number {
+  const revision = canvas?.revision;
+  if (!Number.isInteger(revision) || Number(revision) < 0) {
+    throw new Error("Canvas response is missing a valid revision; refusing an unprotected strict write");
+  }
+  return Number(revision);
+}
+
+const CANVAS_GROUP_PADDING = 48;
+const CANVAS_GROUP_MIN_SIZE = 180;
+
+function parseIdFlags(args: string[], names: string[]): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (!names.includes(args[index])) continue;
+    const raw = args[index + 1];
+    if (!raw || raw.startsWith("--")) {
+      throw new Error(`${args[index]} requires a value`);
+    }
+    values.push(...raw.split(",").map((value) => value.trim()).filter(Boolean));
+    index += 1;
+  }
+  return [...new Set(values)];
+}
+
+function createCanvasGroup(
+  nodes: CanvasNodeRecord[],
+  memberIds: string[],
+  options: CreateCanvasGroupOptions,
+): CanvasGroupRecord {
+  if (!memberIds.length) {
+    throw new Error("A canvas group requires at least one member node");
+  }
+  const nodesById = new Map(nodes.map((node) => [String(node.id), node]));
+  const memberNodes = memberIds.map((nodeId) => {
+    const node = nodesById.get(nodeId);
+    if (!node) throw new Error(`Group member node not found: ${nodeId}`);
+    return node;
+  });
+  const minX = Math.min(...memberNodes.map((node) => Number(node.x) || 0));
+  const minY = Math.min(...memberNodes.map((node) => Number(node.y) || 0));
+  const maxX = Math.max(...memberNodes.map((node) => (Number(node.x) || 0) + (Number(node.width) || 280)));
+  const maxY = Math.max(...memberNodes.map((node) => (Number(node.y) || 0) + (Number(node.height) || 280)));
+  const now = Date.now();
+  return {
+    id: options.id || randomUUID(),
+    title: options.title || "Group",
+    nodeIds: memberIds,
+    x: options.x ?? minX - CANVAS_GROUP_PADDING,
+    y: options.y ?? minY - CANVAS_GROUP_PADDING,
+    width: Math.max(CANVAS_GROUP_MIN_SIZE, options.width ?? maxX - minX + CANVAS_GROUP_PADDING * 2),
+    height: Math.max(CANVAS_GROUP_MIN_SIZE, options.height ?? maxY - minY + CANVAS_GROUP_PADDING * 2),
+    color: options.color || "#64748b",
+    collapsed: options.collapsed === true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export async function addCanvasGroup(api: ApiClient, args: string[]): Promise<CanvasGroupMutationResult> {
+  const dryRun = hasFlag(args, "--dry-run");
+  if (!dryRun && !hasFlag(args, "--yes")) {
+    throw new Error("Creating a canvas group requires explicit --yes");
+  }
+  const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
+  const memberIds = parseIdFlags(args, ["--node-ids", "--node-id"]);
+  if (!memberIds.length) {
+    throw new Error("Creating a canvas group requires --node-ids or --node-id");
+  }
+  const canvas = await getCanvasData(api, canvasId);
+  const baseRevision = requireCanvasRevision(canvas);
+  const group = createCanvasGroup(canvas.nodes as CanvasNodeRecord[], memberIds, {
+    id: getFlagValue(args, "--group-id"),
+    title: getFlagValue(args, "--title") ?? "Group",
+    color: getFlagValue(args, "--color"),
+    x: parseOptionalNumber(getFlagValue(args, "--x"), "--x"),
+    y: parseOptionalNumber(getFlagValue(args, "--y"), "--y"),
+    width: parseOptionalNumber(getFlagValue(args, "--width"), "--width"),
+    height: parseOptionalNumber(getFlagValue(args, "--height"), "--height"),
+    collapsed: hasFlag(args, "--collapsed"),
+  });
+  const ops = [{ type: "add_group", group }];
+
+  if (dryRun) {
+    return {
+      ok: true,
+      dry_run: true,
+      canvas_id: canvasId,
+      group_id: group.id,
+      members: group.nodeIds,
+      group,
+      revision: baseRevision,
+      ops,
+    };
+  }
+
+  const now = Date.now();
+  const update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
+    baseRevision,
+    conflictPolicy: "strict",
+    clientModifiedAt: now,
+    ops,
+  });
+  if (!update.success) {
+    throw new Error(update.error ?? "Failed to add canvas group");
+  }
+  if (update.data?.ignored) {
+    throw new Error("Canvas update was ignored because the server has a newer version. Re-inspect the canvas and retry.");
+  }
+  return {
+    ok: true,
+    dry_run: false,
+    canvas_id: canvasId,
+    project_id: update.data?.project_id,
+    group_id: update.data?.group_id ?? group.id,
+    members: update.data?.members ?? group.nodeIds,
+    group: update.data?.groups?.[0] ?? group,
+    revision: update.data?.revision,
+    clientModifiedAt: update.data?.clientModifiedAt,
+    ops,
+  };
+}
+
+export async function addGenericNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
   const dryRun = hasFlag(args, "--dry-run");
   if (!dryRun && !hasFlag(args, "--yes")) {
     throw new Error("Creating a canvas node requires explicit --yes");
@@ -593,8 +733,15 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
   const title = getFlagValue(args, "--node-title") ?? defaultTitleForNode(nodeType);
   const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
   const requestedY = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
+  const groupTitle = getFlagValue(args, "--group-title");
+  const groupWith = parseIdFlags(args, ["--group-with"]);
+  if (groupWith.length > 0 && !groupTitle) {
+    throw new Error("--group-with requires --group-title");
+  }
   const shape = defaultShapeForNode(nodeType);
-  const canvas = requestedX === undefined || requestedY === undefined ? await getCanvasData(api, canvasId) : undefined;
+  const canvas = requestedX === undefined || requestedY === undefined || groupTitle
+    ? await getCanvasData(api, canvasId)
+    : undefined;
   const position = resolveNodePosition(canvas, nodeType, shape, requestedX, requestedY);
   const x = position.x;
   const y = position.y;
@@ -653,9 +800,27 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
         toNode: connectTo,
       }
     : undefined;
+  const group = groupTitle
+    ? createCanvasGroup(
+        [...((canvas?.nodes ?? []) as CanvasNodeRecord[]), node],
+        [...new Set([node.id, ...groupWith])],
+        {
+          id: getFlagValue(args, "--group-id"),
+          title: groupTitle,
+          color: getFlagValue(args, "--group-color"),
+          x: parseOptionalNumber(getFlagValue(args, "--group-x"), "--group-x"),
+          y: parseOptionalNumber(getFlagValue(args, "--group-y"), "--group-y"),
+          width: parseOptionalNumber(getFlagValue(args, "--group-width"), "--group-width"),
+          height: parseOptionalNumber(getFlagValue(args, "--group-height"), "--group-height"),
+          collapsed: hasFlag(args, "--group-collapsed"),
+        },
+      )
+    : undefined;
+  const baseRevision = group ? requireCanvasRevision(canvas) : undefined;
   const ops = [
     { type: "add_node", node },
     ...(connection ? [connection] : []),
+    ...(group ? [{ type: "add_group", group }] : []),
   ];
 
   if (dryRun) {
@@ -673,13 +838,16 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
       title,
       status,
       connected_to: connectTo ?? null,
+      group_id: group?.id ?? null,
+      members: group?.nodeIds ?? [],
       opened: false,
       ops,
     };
   }
 
   const update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
-    conflictPolicy: "merge",
+    ...(baseRevision !== undefined ? { baseRevision } : {}),
+    conflictPolicy: group ? "strict" : "merge",
     clientModifiedAt: now,
     ops,
   });
@@ -709,6 +877,8 @@ async function addGenericNode(api: ApiClient, args: string[], appBase: string): 
     title,
     status,
     connected_to: connectTo ?? null,
+    group_id: update.data?.group_id ?? group?.id ?? null,
+    members: update.data?.members ?? group?.nodeIds ?? [],
     revision: update.data?.revision,
     clientModifiedAt: update.data?.clientModifiedAt,
     generation_started: false,
@@ -1871,6 +2041,7 @@ interface CanvasData {
   name: string;
   nodes: unknown[];
   connections: unknown[];
+  groups?: unknown[];
   revision?: number;
   clientModifiedAt?: number;
   updatedAt?: number;
@@ -1887,6 +2058,44 @@ interface CanvasNodeRecord {
   title?: string;
   data: Record<string, unknown>;
   status: string;
+}
+
+interface CanvasGroupRecord {
+  id: string;
+  title: string;
+  nodeIds: string[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  collapsed: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface CreateCanvasGroupOptions {
+  id?: string;
+  title?: string;
+  color?: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  collapsed?: boolean;
+}
+
+interface CanvasGroupMutationResult {
+  ok: true;
+  dry_run: boolean;
+  canvas_id: string;
+  project_id?: string;
+  group_id: string;
+  members: string[];
+  group: CanvasGroupRecord | Record<string, unknown>;
+  revision?: number;
+  clientModifiedAt?: number;
+  ops: Array<Record<string, unknown>>;
 }
 
 interface NodeRect {
@@ -1907,6 +2116,9 @@ interface CanvasOpsResponse {
     name?: string;
     nodes?: Array<Record<string, unknown>>;
     connections?: Array<Record<string, unknown>>;
+    groups?: Array<Record<string, unknown>>;
+    group_id?: string | null;
+    members?: string[];
     updated_nodes?: Array<Record<string, unknown>>;
     deleted_node_ids?: string[];
     deleted_connection_ids?: string[];
