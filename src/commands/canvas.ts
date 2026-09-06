@@ -258,7 +258,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
             : `Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
-    text("Usage: mir-cli canvas node <add|update|clone|delete|connect|disconnect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-vibex|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d|add-v-camera>");
+    text("Usage: mir-cli canvas node <add|update|clone|delete|connect|disconnect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-seedance2|add-megaby-video|add-depth-map|add-vibex|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d|add-v-camera>");
     return;
   }
 
@@ -293,6 +293,9 @@ const CANVAS_NODE_TYPES = new Set([
   "video-item",
   "image",
   "video",
+  "seedance2",
+  "megaby-video",
+  "depth-map",
   "seedance-volc",
   "seedance2-rh-standard",
   "vibex-webapp",
@@ -336,6 +339,9 @@ const NODE_ACTION_ALIASES: Record<string, string> = {
   "add-llm": "llm",
   "add-suno": "suno",
   "add-seedance": "seedance",
+  "add-seedance2": "seedance2",
+  "add-megaby-video": "megaby-video",
+  "add-depth-map": "depth-map",
   "add-seedance-volc": "seedance-volc",
   "add-seedance-rh": "seedance2-rh-standard",
   "add-vibex": "vibex-webapp",
@@ -1095,7 +1101,7 @@ async function disconnectCanvasNodes(api: ApiClient, args: string[], appBase: st
   return { ...result, connection_id: connectionId ?? null, from_node: fromNode ?? null, to_node: toNode ?? null };
 }
 
-async function updateCanvasNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
+export async function updateCanvasNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
   if (!hasFlag(args, "--yes")) {
     throw new Error("Updating a canvas node requires explicit --yes");
   }
@@ -1134,6 +1140,12 @@ async function updateCanvasNode(api: ApiClient, args: string[], appBase: string)
     if (modelTask) await assertModelAvailable(api, modelTask, model);
   }
   const normalizedDataPatch = normalizeNodeDataForType(nodeType, args, content ?? "", rawTitle ?? title, dataJson ?? {});
+  if (nodeType === "depth-map" && normalizedDataPatch.depthSettings) {
+    normalizedDataPatch.depthSettings = {
+      ...(((node.data as Record<string, unknown> | undefined)?.depthSettings as Record<string, unknown> | undefined) ?? {}),
+      ...(normalizedDataPatch.depthSettings as Record<string, unknown>),
+    };
+  }
   const dataPatch = {
     ...normalizedDataPatch,
     ...(settings ? { settings } : {}),
@@ -1632,6 +1644,8 @@ function looksLikeUrl(value: string): boolean {
 }
 
 function defaultShapeForNode(type: string): { width: number; height: number } {
+  if (type === "seedance2" || type === "megaby-video") return { width: 420, height: 580 };
+  if (type === "depth-map") return { width: 380, height: 520 };
   if (type === "relay") return { width: 50, height: 50 };
   if (type === "text" || type === "llm" || type === "agent" || type === "seedance") {
     return { width: 320, height: type === "agent" || type === "seedance" ? 420 : 280 };
@@ -1663,6 +1677,9 @@ function defaultTitleForNode(type: string): string | undefined {
     agent: "LLM生成器",
     llm: "LLM",
     seedance: "Seedance 2.0",
+    seedance2: "特惠视频生成 seedance minimax",
+    "megaby-video": "Megaby 视频",
+    "depth-map": "深度视频",
     suno: "Suno 音乐",
     "seedance-volc": "seedance2.0-火山版",
     "seedance2-rh-standard": "seedance2.0-RH版",
@@ -1694,6 +1711,8 @@ function defaultStatusForNode(type: string, content: string): "idle" | "complete
 }
 
 function defaultDataForNode(type: string): Record<string, unknown> {
+  // Model-specific defaults are resolved by the current web model catalog.
+  if (type === "seedance2" || type === "megaby-video") return {};
   if (type === "suno") {
     return { sunoModel: "suno", sunoVersion: "chirp-fenix", sunoMode: "description", sunoInstrumental: false };
   }
@@ -1756,7 +1775,21 @@ function normalizeNodeDataForType(
   data: Record<string, unknown>,
 ): Record<string, unknown> {
   const normalized = { ...data };
+  if (["image", "video", "seedance2", "megaby-video"].includes(type)) {
+    Object.assign(normalized, booleanPairFlag(args, "--pre-llm", "--no-pre-llm", "preLlmEnabled"));
+    for (const [flag, field] of [
+      ["--pre-llm-model", "preLlmModel"],
+      ["--pre-llm-template-id", "preLlmTemplateId"],
+      ["--pre-llm-template-name", "preLlmTemplateName"],
+      ["--pre-llm-template-content", "preLlmTemplateContent"],
+    ]) {
+      const value = getFlagValue(args, flag);
+      if (value !== undefined) normalized[field] = value;
+    }
+  }
 
+  if (type === "seedance2" || type === "megaby-video") return normalizeUnifiedVideoData(args, normalized);
+  if (type === "depth-map") return normalizeDepthData(args, normalized);
   if (type === "suno") return normalizeSunoData(args, content, nodeTitle, normalized);
   if (type === "image") return normalizeImageData(args, normalized);
   if (type === "video") return normalizeVideoData(args, normalized);
@@ -1883,6 +1916,14 @@ function normalizeVideoData(args: string[], data: Record<string, unknown>): Reco
 }
 
 function normalizeLlmData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  for (const [flag, field] of [
+    ["--system-template-id", "agentSystemTemplateId"],
+    ["--system-template-name", "agentSystemTemplateName"],
+    ["--system-template-content", "agentSystemTemplateContent"],
+  ]) {
+    const value = getFlagValue(args, flag);
+    if (value !== undefined) data[field] = value;
+  }
   const mode = firstString(getFlagValue(args, "--mode"), data.mode);
   const systemPrompt = firstString(getFlagValue(args, "--system-prompt"), getFlagValue(args, "--system"), data.systemPrompt, data.systemInstruction);
   const llmModel = firstString(getFlagValue(args, "--llm-model"), getFlagValue(args, "--model"), data.llmModel);
@@ -1894,6 +1935,59 @@ function normalizeLlmData(args: string[], data: Record<string, unknown>): Record
     ...(llmModel ? { llmModel } : {}),
     ...booleanFlag(args, "--hide-output", "hideOutput"),
   };
+}
+
+function normalizeUnifiedVideoData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const size = firstString(getFlagValue(args, "--ratio"), getFlagValue(args, "--aspect-ratio"), getFlagValue(args, "--size"), data.size);
+  const resolution = firstString(getFlagValue(args, "--resolution"), data.resolution);
+  const rawDuration = firstString(getFlagValue(args, "--duration"), getFlagValue(args, "--seconds"), data.duration === undefined ? undefined : String(data.duration));
+  const duration = parseOptionalNumber(rawDuration, "--duration");
+  if (duration !== undefined && (duration <= 0 || !Number.isInteger(duration))) {
+    throw new Error("--duration must be a positive integer; use canvas models --task video for model limits");
+  }
+  const seed = parseOptionalNumber(getFlagValue(args, "--seed"), "--seed");
+  if (seed !== undefined && !Number.isInteger(seed)) throw new Error("--seed must be an integer");
+  return {
+    ...data,
+    ...(size ? { size } : {}),
+    ...(resolution ? { resolution } : {}),
+    ...(duration !== undefined ? { duration } : {}),
+    ...(seed !== undefined ? { seed } : {}),
+    ...booleanPairFlag(args, "--generate-audio", "--no-audio", "generate_audio"),
+    ...booleanPairFlag(args, "--first-last-frames", "--no-first-last-frames", "use_first_last_frames"),
+    ...booleanPairFlag(args, "--return-last-frame", "--no-return-last-frame", "return_last_frame"),
+  };
+}
+
+function normalizeDepthData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
+  const current = data.depthSettings;
+  if (current !== undefined && (!current || typeof current !== "object" || Array.isArray(current))) {
+    throw new Error("depthSettings must be an object");
+  }
+  const settings = { ...(current as Record<string, unknown> | undefined) };
+  for (const [flag, field, allowed] of [
+    ["--depth-model", "model", ["small", "base"]],
+    ["--depth-style", "style", ["gray", "inferno", "viridis"]],
+    ["--depth-fps", "fps", ["source", "8", "12", "15", "24", "30"]],
+    ["--depth-max-side", "maxSide", ["512", "768", "1024", "2048"]],
+  ] as const) {
+    const value = getFlagValue(args, flag);
+    if (value === undefined) continue;
+    if (!(allowed as readonly string[]).includes(value)) throw new Error(`Invalid ${flag}: expected ${allowed.join(", ")}`);
+    settings[field] = field === "maxSide" || (field === "fps" && value !== "source") ? Number(value) : value;
+  }
+  for (const [flag, field, min, max] of [
+    ["--depth-start", "startSeconds", 0, 180],
+    ["--depth-duration", "durationSeconds", 0.2, 30],
+    ["--depth-temporal", "temporal", 0, 0.9],
+  ] as const) {
+    const value = parseOptionalNumber(getFlagValue(args, flag), flag);
+    if (value === undefined) continue;
+    if (value < min || value > max) throw new Error(`Invalid ${flag}: expected ${min} to ${max}`);
+    settings[field] = value;
+  }
+  Object.assign(settings, booleanPairFlag(args, "--depth-invert", "--no-depth-invert", "invert"));
+  return Object.keys(settings).length ? { ...data, depthSettings: settings } : data;
 }
 
 function normalizeSeedanceVideoData(type: string, args: string[], data: Record<string, unknown>): Record<string, unknown> {
@@ -2055,7 +2149,7 @@ function modelDataForNode(type: string, model: string): Record<string, unknown> 
 
 function modelTaskForNode(type: string): string | undefined {
   if (type === "image" || type === "panorama-gen" || type === "upscale") return "image";
-  if (type === "video" || type === "seedance-volc" || type === "seedance2-rh-standard") return "video";
+  if (type === "video" || type === "seedance2" || type === "megaby-video" || type === "seedance-volc" || type === "seedance2-rh-standard") return "video";
   if (type === "suno") return "audio";
   if (type === "agent" || type === "llm" || type === "seedance") return "llm";
   return undefined;

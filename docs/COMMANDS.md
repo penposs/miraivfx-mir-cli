@@ -82,6 +82,24 @@ mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Shot note
 For these atomic group writes only, an HTTP 5xx response triggers one read-only canvas verification and never a mutation retry. mir-cli checks the pre-generated node/group IDs; persisted IDs return `response_status: "committed_with_response_error"`, while missing IDs remain a command failure.
 
 Supported node types are reported by `mir-cli canvas capabilities --json`.
+
+### Current unified video and depth nodes
+
+```powershell
+mir-cli canvas models --task video --json
+mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --model <model_id> --prompt "Video prompt" --ratio 16:9 --duration 10 --resolution 720p --first-last-frames --dry-run --json
+mir-cli canvas node add-megaby-video --canvas-id <canvas_id> --model <model_id> --prompt "Video prompt" --ratio 9:16 --duration 5 --yes --json
+mir-cli canvas node add-depth-map --canvas-id <canvas_id> --depth-model small --depth-fps source --depth-max-side 1024 --depth-duration 15 --depth-style gray --yes --json
+mir-cli canvas node connect --canvas-id <canvas_id> --from-node <video_node_id> --to-node <depth_node_id> --yes --json
+```
+
+`seedance2` is the unified video node, including the current Seedance 2.5, Megaby, and RunningHub H3 model families exposed by the web catalog. `megaby-video` remains available for compatible existing workflows. `add-seedance` / type `seedance` retains its legacy LLM behavior. Use `add-seedance2` for the unified video node.
+
+Unified video maps `--ratio` / `--aspect-ratio` / `--size` to `size`, `--duration` / `--seconds` to numeric `duration`, and `--resolution` to `resolution`. Audio, first/last-frame mode and last-frame output use `--generate-audio` / `--no-audio`, `--first-last-frames` / `--no-first-last-frames`, and `--return-last-frame` / `--no-return-last-frame`. `--seed` accepts integers. These options depend on the chosen model; inspect its current schema with `canvas models`. Model-specific defaults remain with the website. Explicit `--model` values are checked against the account's available video models.
+
+Depth options are written inside `depthSettings`: `--depth-model small|base`, `--depth-fps source|8|12|15|24|30`, `--depth-max-side 512|768|1024|2048`, `--depth-start` (0–180 seconds), `--depth-duration` (0.2–30 seconds), `--depth-style gray|inferno|viridis`, `--depth-temporal` (0–0.9), and `--depth-invert` / `--no-depth-invert`. Connect exactly one input video and run depth processing in the browser. Updating one depth option preserves the other saved depth settings.
+
+Image, video, and unified video nodes accept `--pre-llm` / `--no-pre-llm`, `--pre-llm-model`, and `--pre-llm-template-id`, `--pre-llm-template-name`, `--pre-llm-template-content`. LLM/agent nodes accept `--system-template-id`, `--system-template-name`, `--system-template-content`. These flags also work with `canvas node update`. Template fields store the supplied values; they do not fetch template content by ID. CLI commands prepare nodes; generation remains a manual web action.
 When `--x`/`--y` are omitted, the CLI picks a non-overlapping position from the current canvas. `add-reference-image` reuses an existing material node with the same URL by default; use `--force-new` or `--duplicate` only when a second visible copy is intentional.
 Use `add-suno` for music or song generation. It accepts `--lyrics`, `--song-title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, and `--instrumental`, and maps them to the Suno node fields used by the web canvas.
 For Suno nodes, `--title` is treated as the song title for compatibility. Node headers are visual labels; use `--node-title` only when you intentionally want to rename a canvas node header.

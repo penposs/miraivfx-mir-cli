@@ -27,6 +27,9 @@ Usage:
   mir-cli canvas node add-suno --canvas-id <canvas_id> --song-title "Song title" --style "R&B, soul" --lyrics "[Verse]..." --yes --json
   mir-cli canvas node add-suno --canvas-id <canvas_id> --title "Song title" --style "R&B, soul" --lyrics "[Verse]..." --yes --json
   mir-cli canvas node add-seedance-rh --canvas-id <canvas_id> --prompt "Video prompt" --ratio 16:9 --duration 10 --resolution 720p --yes --json
+  mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --prompt "Video prompt" --model <model_id> --ratio 16:9 --duration 10 --first-last-frames --yes --json
+  mir-cli canvas node add-megaby-video --canvas-id <canvas_id> --prompt "Video prompt" --model <model_id> --yes --json
+  mir-cli canvas node add-depth-map --canvas-id <canvas_id> --depth-model small --depth-fps 30 --depth-max-side 512 --yes --json
   mir-cli canvas node add-resize --canvas-id <canvas_id> --resize-mode longest --resize-width 1024 --yes --json
   mir-cli canvas node add-vibex --canvas-id <canvas_id> --yes --json
   mir-cli canvas node add-runninghub --canvas-id <canvas_id> --webapp-id <app_id> --api-key <saved_key_name> --values-json '{"node|field":"value"}' --yes --json

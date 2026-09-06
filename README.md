@@ -144,6 +144,17 @@ If that atomic request returns HTTP 5xx, mir-cli never retries the mutation. It 
 
 Add a video generation node:
 
+For the current unified video node, first inspect available models, then use its model ID:
+
+```powershell
+mir-cli canvas models --task video --json
+mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --model <model_id> --prompt "Video prompt" --ratio 16:9 --duration 10 --yes --json
+```
+
+The CLI also supports `add-megaby-video` and `add-depth-map`, plus pre-LLM and agent template fields. See [command details](docs/COMMANDS.md#current-unified-video-and-depth-nodes). `add-seedance` keeps its legacy LLM behavior. Depth processing and video generation run from the website.
+
+For the existing RH node:
+
 ```powershell
 mir-cli canvas node add-seedance-rh --canvas-id <canvas_id> --prompt "Video prompt" --ratio "16:9" --duration 12 --resolution 720p --yes --json
 ```
