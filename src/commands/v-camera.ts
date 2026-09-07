@@ -1693,6 +1693,7 @@ export function vCameraUsage(): string {
   return [
     "Usage: mir-cli canvas v-camera <capabilities|inspect|create|scene|project|actor|prop|camera|shot|cut> ...",
     "  capabilities --json: offline, versioned Virtual Shoot parameter contract",
+    "  scene compile|validate|sample|capture|render --help: spatial plans and local rendered previs artifacts",
     "  scene apply --canvas-id <id> --node-id <id> --file <scene.json> [--expected-empty] --dry-run|--yes",
     "  actor/prop/camera: add | set | translate | delete | path add | path set | path update | path delete | path clear",
     "  actor: action add | action set | action delete | action clear",

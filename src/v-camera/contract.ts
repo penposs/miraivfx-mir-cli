@@ -30,8 +30,9 @@ export const VCAMERA_LIMITS = {
 } as const;
 
 export const VCAMERA_ENUMS = {
+  actorOrientationMode: ["movement", "custom", "look_at"],
   safeFrameRatio: ["off", "9:16", "16:9", "1:1"],
-  sceneEasing: ["smooth", "linear", "ease_in", "ease_out", "ease_in_out"],
+  sceneEasing: ["smooth", "linear", "ease_in", "ease_out", "ease_in_out", "sprint"],
   actorJointId: [
     "pelvis", "spine_lower", "spine_upper", "neck", "head",
     "upper_arm_l", "lower_arm_l", "hand_l", "upper_arm_r", "lower_arm_r", "hand_r",
@@ -198,6 +199,8 @@ export const VCAMERA_FIELDS = {
     position: vec3(["actor add --position", "actor set --position", "actor translate --delta"], { required: true, default: VCAMERA_DEFAULTS.actor.position }),
     rotation: vec3(["actor add --rotation", "actor set --rotation"], { required: true, ...VCAMERA_LIMITS.rotation, default: VCAMERA_DEFAULTS.actor.rotation }),
     height: raw("number", ["actor add --height", "actor set --height"], { required: true, ...VCAMERA_LIMITS.actorHeight, default: VCAMERA_DEFAULTS.actor.height }),
+    orientationMode: raw("enum", ["scene apply", "scene compile"], { enum: "actorOrientationMode" }),
+    performanceClips: raw("collection", ["scene apply", "scene compile"], { notes: ["Timed natural_idle/natural_walk/natural_run clips; non-overlapping, maximum 500 per actor. Preserved when inspecting or editing other fields."] }),
     lookAtActorId: raw("id", ["actor set --look-at-actor", "actor set --clear-look-at-actor", "actor set --clear-look-at"], { nullable: true, clearable: true, reference: "actor" }),
     lookAtPoint: vec3(["actor set --look-at-point", "actor set --clear-look-at-point", "actor set --clear-look-at"], { nullable: true, clearable: true }),
     actionMarkers: raw("collection", ["actor action add", "actor action set", "actor action delete", "actor action clear"], { itemType: "actionMarker" }),
@@ -325,6 +328,7 @@ export const VCAMERA_CONTRACT = {
     interpolation: {
       positionPath: "piecewise_eased_linear",
       easingAppliesTo: "time_progress_only",
+      smoothPathTiming: "continuous_linear_progress_without_waypoint_braking",
       identicalEndpointBehavior: "exact_hold",
       overshootAllowed: false,
       afterLastKeyframe: "exact_final_hold",
@@ -434,6 +438,7 @@ export const VCAMERA_CONTRACT = {
     { id: "create_only_scene_apply", description: "scene apply --expected-empty maps to mode=create_only so a populated target cannot be replaced after inspection." },
   ],
   rawCommands: [
+    "scene compile|validate|sample|capture|render",
     "scene apply",
     "project set",
     "actor add|set|translate|delete|path|action|pose",
@@ -442,6 +447,19 @@ export const VCAMERA_CONTRACT = {
     "shot add|set|delete",
     "cut add|set|delete|clear",
   ],
+  previs: {
+    planVersion: 1,
+    guide: "docs/VCAMERA_PREVIS.md",
+    example: "examples/v-camera-spatial-plan.json",
+    compile: { input: "agent-authored spatial plan JSON", output: "canonical scene apply project", units: "meter", imageInterpretation: "caller-owned", primitives: ["room with door openings", "table", "chair", "existing prop presets"], routes: "explicit positions or named anchors at absolute scene times", autoNavigation: false },
+    validate: { offline: true, scope: "sampled_proxy_geometry", defaultStepSeconds: 0.1, exitOnWarnings: 2, exactPhysics: false, followCameraCollision: false },
+    sample: { runtime: "actual frontend camera/actor/prop sampler", maxTimes: 120 },
+    capture: { runtime: "actual Virtual Shoot renderer", format: "png", views: ["camera", "overview"], maxTimes: 120 },
+    render: { runtime: "actual Virtual Shoot renderer with explicit frame timestamps", formats: ["mp4", "webm"], maxFrames: 18000, fps: [1, 60], audio: false, browserCodecRequired: true },
+    browser: { route: "/v-camera/previs?automation=1", bridgeVersion: 1, profile: "isolated", requiresUpdatedFrontend: true, automaticBrowserDownload: false, flags: ["--app-url", "--browser-path", "--width", "--height"] },
+    source: "--file <canonical scene.json> OR --canvas-id <id> --node-id <id>",
+    writes: "Local outputs only; scene apply separately writes a canvas node. --overwrite is required to replace output files.",
+  },
   rawCommandEffects: {
     "actor|prop|camera set --sync-origin": ["Updates the entity base position and every zero-time path point only."],
     "actor|prop|camera translate": ["Translates the entity base position and every path point position by the declared delta."],

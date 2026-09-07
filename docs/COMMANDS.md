@@ -116,6 +116,8 @@ Common aliases include `add-text`, `add-video`, `add-audio`, `add-video-referenc
 
 ## Virtual Shoot
 
+Spatial plan compilation, motion checks, real runtime sampling, PNG captures and MP4/WebM previews are documented in [VCAMERA_PREVIS.md](VCAMERA_PREVIS.md). Use `canvas v-camera scene <compile|validate|sample|capture|render> --help` for local artifact commands. They preserve the separate revision-protected `scene apply` write flow.
+
 Create and inspect:
 
 ```powershell
@@ -242,10 +244,12 @@ Path fields are written independently from camera mode and preset metadata. Addi
 | `time` | `--time` or JSON `time` | actor, prop, camera; global seconds |
 | `position` | `--position` or JSON `position` | actor, prop, camera |
 | `yaw` | `--yaw` or JSON `yaw` | actor only |
-| `easing` | `--easing` or JSON `easing` | `smooth`, `linear`, `ease_in`, `ease_out`, `ease_in_out` |
+| `easing` | `--easing` or JSON `easing` | `smooth`, `linear`, `ease_in`, `ease_out`, `ease_in_out`, `sprint` |
 | `rotation` | `--rotation` or JSON `rotation` | prop and camera |
 | `fov` | `--fov` or JSON `fov` | camera only |
 | `focusDistance` | `--focus-distance` or JSON `focusDistance` | camera only |
+
+`sprint` front-loads the segment movement for a strong launch, then eases into the endpoint without overshoot.
 
 Use `path update --point <id>` with any supported field to update one path point while preserving its ID. Actor points support `--clear-yaw`; prop and camera points support `--clear-rotation`; every path supports `--clear-easing`; camera points additionally support `--clear-fov` and `--clear-focus-distance`.
 

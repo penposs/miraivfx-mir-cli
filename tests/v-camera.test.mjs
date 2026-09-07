@@ -23,7 +23,7 @@ import {
   getActorTrackingPointWorldApproximation,
   resolveActorPosePreset,
 } from "../dist/v-camera/actor-pose.js";
-import { interpolatePathPosition } from "../dist/v-camera/path-interpolation.js";
+import { applySceneEasing, interpolatePathPosition } from "../dist/v-camera/path-interpolation.js";
 import { VCAMERA_CONTRACT } from "../dist/v-camera/contract.js";
 import { getActorBasePoseBounds, getProjectSpatialSummary, getPropBasePoseBounds } from "../dist/v-camera/spatial.js";
 
@@ -763,6 +763,16 @@ test("scene path interpolation is bounded, holds stationary axes exactly, and ho
   assert.deepEqual(interpolatePathPosition(target, 30), [2, 8, -2]);
 });
 
+test("sprint rhythm launches harder than quick easing and remains bounded", () => {
+  assert.equal(applySceneEasing(0, "sprint"), 0);
+  assert.equal(applySceneEasing(1, "sprint"), 1);
+  assert.ok(applySceneEasing(0.25, "sprint") > applySceneEasing(0.25, "ease_out"));
+  for (const amount of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]) {
+    const value = applySceneEasing(amount, "sprint");
+    assert.ok(value >= 0 && value <= 1);
+  }
+});
+
 test("fractional path endpoints stay exactly collinear without per-axis rounding", () => {
   const end = [1.1, 2.3, -3.7];
   const target = {
@@ -1451,8 +1461,8 @@ test("capabilities covers every formal scene entity field", () => {
     "fps", "isPlaying", "name", "safeFrameRatio", "shots", "version",
   ]);
   assert.deepEqual(Object.keys(VCAMERA_CONTRACT.fields.actor).sort(), [
-    "actionMarkers", "height", "id", "lookAtActorId", "lookAtPoint", "name", "pathPoints",
-    "pose", "poseKeyframes", "position", "rotation",
+    "actionMarkers", "height", "id", "lookAtActorId", "lookAtPoint", "name", "orientationMode", "pathPoints",
+    "performanceClips", "pose", "poseKeyframes", "position", "rotation",
   ]);
   assert.deepEqual(Object.keys(VCAMERA_CONTRACT.fields.prop).sort(), [
     "assetId", "id", "locked", "name", "pathPoints", "position", "propPreset", "rotation",

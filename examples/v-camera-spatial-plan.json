@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "units": "meter",
+  "name": "Two rooms / two actors / continuous camera",
+  "duration": 12,
+  "fps": 24,
+  "safeFrameRatio": "16:9",
+  "reference": "Replace with your spatial blocking image reference; this example is authored geometry.",
+  "assumptions": ["Floor level is 0m; room height is 3m; the shared opening is 2.4m wide."],
+  "anchors": {
+    "lead_start": [-0.4, 0, 4],
+    "lead_door": [-0.4, 0, 0],
+    "lead_stop": [-0.4, 0, -4],
+    "partner_start": [0.4, 0, 4],
+    "partner_door": [0.4, 0, 0],
+    "partner_stop": [0.4, 0, -4]
+  },
+  "rooms": [
+    { "id": "entrance", "position": [0, 0, 3], "size": [8, 3, 8], "doors": [{ "wall": "north", "width": 2.4, "height": 2.5 }] },
+    { "id": "hall", "position": [0, 0, -5], "size": [8, 3, 8], "doors": [{ "wall": "south", "width": 2.4, "height": 2.5 }] }
+  ],
+  "props": [
+    { "id": "table", "preset": "table", "position": [2, 0, -5], "size": [1.5, 0.8, 1] },
+    { "id": "chair", "preset": "chair", "position": [2, 0, -6.2], "size": [0.5, 0.9, 0.5] }
+  ],
+  "actors": [
+    { "id": "lead", "name": "Lead", "position": "lead_start", "route": [
+      { "time": 0, "position": "lead_start" }, { "time": 4, "position": "lead_door" },
+      { "time": 8, "position": "lead_stop" }, { "time": 12, "position": "lead_stop" }
+    ] },
+    { "id": "partner", "name": "Partner", "position": "partner_start", "route": [
+      { "time": 0, "position": "partner_start" }, { "time": 4, "position": "partner_door" },
+      { "time": 8, "position": "partner_stop" }, { "time": 12, "position": "partner_stop" }
+    ] }
+  ],
+  "cameras": [
+    { "id": "main", "position": [0, 1.6, 6], "trackingActorId": "lead", "fov": 55, "route": [
+      { "time": 0, "position": [0, 1.6, 6] }, { "time": 4, "position": [0, 1.6, 2] },
+      { "time": 8, "position": [0, 1.6, -2] }, { "time": 12, "position": [1, 1.6, -3] }
+    ] }
+  ]
+}

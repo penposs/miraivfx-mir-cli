@@ -10,7 +10,7 @@ import { createNeutralActorPose } from "./actor-pose.js";
 
 export type Vec3 = [number, number, number];
 export type SafeFrameRatio = "off" | "9:16" | "16:9" | "1:1";
-export type SceneEasing = "smooth" | "linear" | "ease_in" | "ease_out" | "ease_in_out";
+export type SceneEasing = "smooth" | "linear" | "ease_in" | "ease_out" | "ease_in_out" | "sprint";
 export const SCENE_EASINGS = VCAMERA_ENUMS.sceneEasing;
 export type CameraMovementMode = "static" | "path" | "follow";
 export type CameraAimMode = "manual" | "actor" | "point";
@@ -72,6 +72,8 @@ export interface Actor {
   position: Vec3;
   rotation: Vec3;
   height: number;
+  orientationMode?: "movement" | "custom" | "look_at";
+  performanceClips?: Array<{ id: string; actionId: string; startTime: number; endTime: number; speed: number; loop: boolean; blendIn: number; blendOut: number }>;
   lookAtActorId?: string | null;
   lookAtPoint?: Vec3 | null;
   actionMarkers?: Array<{
@@ -455,6 +457,7 @@ export function getProjectSceneEnd(project: Pick<VCameraProject, "actors" | "cub
     times.push(...actor.pathPoints.map((point) => point.time));
     times.push(...(actor.actionMarkers ?? []).map((marker) => marker.time));
     times.push(...actor.poseKeyframes.map((frame) => frame.time));
+    times.push(...(actor.performanceClips ?? []).map((clip) => clip.endTime));
   }
   for (const prop of project.cubes) {
     times.push(...prop.pathPoints.map((point) => point.time));
@@ -497,7 +500,7 @@ function worldOffsetToActorLocal(offset: Vec3, yawDegrees: number): Vec3 {
 
 function normalizeActor(value: unknown, path: string, legacyPathSource: boolean, legacyPoseSource: boolean): Actor {
   const actor = projectRecord(value, path, [
-    "id", "name", "position", "rotation", "height", "lookAtActorId", "lookAtPoint", "actionMarkers", "pose", "poseKeyframes", "pathPoints",
+    "id", "name", "position", "rotation", "height", "lookAtActorId", "lookAtPoint", "actionMarkers", "pose", "poseKeyframes", "pathPoints", "orientationMode", "performanceClips",
   ]);
   const pathPoints = normalizeActorPathPoints(actor.pathPoints, `${path}.pathPoints`, legacyPathSource);
   const zeroPoint = [...pathPoints].sort((a, b) => a.time - b.time).find((point) => point.time <= 0);
@@ -511,6 +514,8 @@ function normalizeActor(value: unknown, path: string, legacyPathSource: boolean,
     position: zeroPoint ? [...zeroPoint.position] : position,
     rotation: projectVec3(actor.rotation, `${path}.rotation`, VCAMERA_LIMITS.rotation.maximum),
     height: projectNumber(actor.height, `${path}.height`, VCAMERA_LIMITS.actorHeight.minimum, VCAMERA_LIMITS.actorHeight.maximum),
+    ...(actor.orientationMode === undefined ? {} : { orientationMode: projectChoice(actor.orientationMode, `${path}.orientationMode`, ["movement", "custom", "look_at"] as const) }),
+    ...(actor.performanceClips === undefined ? {} : { performanceClips: normalizePerformanceClips(actor.performanceClips, `${path}.performanceClips`) }),
     ...(actor.lookAtActorId == null ? {} : { lookAtActorId: projectText(actor.lookAtActorId, `${path}.lookAtActorId`) }),
     ...(actor.lookAtPoint == null ? {} : { lookAtPoint: projectVec3(actor.lookAtPoint, `${path}.lookAtPoint`) }),
     actionMarkers: normalizeCollection(actor.actionMarkers, `${path}.actionMarkers`, VCAMERA_LIMITS.collections.actionMarkersPerActor, (item, itemPath) => {
@@ -529,6 +534,29 @@ function normalizeActor(value: unknown, path: string, legacyPathSource: boolean,
     poseKeyframes: normalizePoseKeyframes(actor.poseKeyframes, `${path}.poseKeyframes`),
     pathPoints,
   };
+}
+
+function normalizePerformanceClips(value: unknown, path: string): NonNullable<Actor["performanceClips"]> {
+  const clips = normalizeCollection(value, path, 500, (item, itemPath) => {
+    const clip = projectRecord(item, itemPath, ["id", "actionId", "startTime", "endTime", "speed", "loop", "blendIn", "blendOut"]);
+    const startTime = projectNumber(clip.startTime, `${itemPath}.startTime`, 0, 3600);
+    const endTime = projectNumber(clip.endTime, `${itemPath}.endTime`, 0, 3600);
+    if (endTime <= startTime) invalidProject(itemPath, "endTime must exceed startTime");
+    return {
+      id: projectText(clip.id, `${itemPath}.id`),
+      actionId: projectChoice(clip.actionId, `${itemPath}.actionId`, ["natural_idle", "natural_walk", "natural_run"] as const),
+      startTime, endTime,
+      speed: projectNumber(clip.speed ?? 1, `${itemPath}.speed`, 0.1, 4),
+      loop: projectBoolean(clip.loop ?? true, `${itemPath}.loop`),
+      blendIn: projectNumber(clip.blendIn ?? 0.18, `${itemPath}.blendIn`, 0, 2),
+      blendOut: projectNumber(clip.blendOut ?? 0.18, `${itemPath}.blendOut`, 0, 2),
+    };
+  }).sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
+  ensureUniqueProjectIds(clips, path);
+  for (let index = 1; index < clips.length; index++) {
+    if (clips[index].startTime < clips[index - 1].endTime) invalidProject(path, "clips must not overlap");
+  }
+  return clips;
 }
 
 export function normalizeActorPoseValue(value: unknown, path = "pose"): ActorPose {

@@ -9,8 +9,15 @@ export function applySceneEasing(amount: number, easing?: SceneEasing) {
   if (easing === "linear") return value;
   if (easing === "ease_in") return value * value;
   if (easing === "ease_out") return 1 - (1 - value) * (1 - value);
+  if (easing === "sprint") return 1 - (1 - value) ** 4;
   if (easing === "ease_in_out") return value < 0.5 ? 2 * value * value : 1 - ((-2 * value + 2) ** 2) / 2;
   return value * value * (3 - 2 * value);
+}
+
+/** Match the node's continuous path timing; smooth does not brake at each waypoint. */
+export function applyScenePathProgress(amount: number, easing?: SceneEasing) {
+  if (easing === "smooth" || easing === "linear") return clampUnit(amount);
+  return applySceneEasing(amount, easing);
 }
 
 export function interpolatePathSegmentPosition(
@@ -48,7 +55,7 @@ export function interpolatePathPosition<T extends ScenePathPoint>(
     return interpolatePathSegmentPosition(
       start,
       end,
-      applySceneEasing(normalizedTime, end.easing ?? start.easing ?? DEFAULT_SCENE_PATH_EASING),
+      applyScenePathProgress(normalizedTime, end.easing ?? start.easing ?? DEFAULT_SCENE_PATH_EASING),
     );
   }
   return [...target.position];

@@ -23,6 +23,8 @@ Use `mir-cli` when you want to:
 
 Current public install:
 
+Version 0.5.0 adds Virtual Shoot spatial plan compilation, validation, runtime sampling, screenshots and previs video export. Browser-based previs requires a frontend deployment containing `/v-camera/previs`; updating the CLI alone does not update the website. File-based compilation and validation work offline.
+
 ```powershell
 npm i -g github:penposs/miraivfx-mir-cli
 ```
@@ -226,6 +228,8 @@ mir-cli canvas node delete --canvas-id <canvas_id> --node-id <node_id> --yes --j
 ```
 
 ## Control Virtual Shoot
+
+For spatial-image-driven simple 3D scenes, actor blocking, camera motion and local previs videos, see [Spatial previs workflow](docs/VCAMERA_PREVIS.md). `scene compile`, `validate`, `sample`, `capture` and `render` complement the existing scene-control commands; start from [the spatial plan example](examples/v-camera-spatial-plan.json).
 
 Create or inspect a Virtual Shoot node:
 

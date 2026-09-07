@@ -10,11 +10,16 @@ import { openUrl } from "../core/open.js";
 import { json, text } from "../core/output.js";
 import { handleVCameraCommand, vCameraUsage } from "./v-camera.js";
 import { getVCameraCapabilities } from "../v-camera/contract.js";
+import { handleLocalSceneCommand, LOCAL_SCENE_COMMANDS } from "./v-camera-scene.js";
 
 export async function handleCanvasCommand(subcommand = "", args: string[]): Promise<void> {
   const asJson = hasFlag(args, "--json");
   if (subcommand === "v-camera" && args[0] === "capabilities") {
     json(getVCameraCapabilities());
+    return;
+  }
+  if (subcommand === "v-camera" && args[0] === "scene" && (LOCAL_SCENE_COMMANDS as readonly string[]).includes(args[1])) {
+    await handleLocalSceneCommand(args[1], args.slice(2));
     return;
   }
   const config = await loadRuntimeConfig();
