@@ -153,12 +153,12 @@ mir-cli canvas models --task video --json
 mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --model <model_id> --prompt "Video prompt" --ratio 16:9 --duration 10 --yes --json
 ```
 
-The CLI also supports `add-megaby-video` and `add-depth-map`, plus pre-LLM and agent template fields. See [command details](docs/COMMANDS.md#current-unified-video-and-depth-nodes). `add-seedance` keeps its legacy LLM behavior. Depth processing and video generation run from the website.
+The CLI supports all six current AI-panel nodes, including `add-depth-map`, pre-LLM and agent template fields. `add-seedance` creates the Seedance prompt assistant. Use `add-seedance2` for Seedance, Megaby and MiniMax video models. See [node synchronization and retired entries](docs/NODE_SYNC.md) and [command details](docs/COMMANDS.md#current-unified-video-and-depth-nodes). Depth processing and video generation run from the website.
 
-For the existing RH node:
+For the current unified video node:
 
 ```powershell
-mir-cli canvas node add-seedance-rh --canvas-id <canvas_id> --prompt "Video prompt" --ratio "16:9" --duration 12 --resolution 720p --yes --json
+mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --prompt "Video prompt" --ratio "16:9" --duration 12 --resolution 720p --yes --json
 ```
 
 Add a Suno music generation node with custom lyrics:
@@ -173,10 +173,9 @@ For Suno nodes, `--title` is treated as the song title for compatibility. Node h
 Common generation node fields can be passed directly without `--data-json`:
 
 ```powershell
-mir-cli canvas node add-video --canvas-id <canvas_id> --prompt "A cinematic shot" --duration 10 --video-service veo --yes --json
+mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --prompt "A cinematic shot" --duration 10 --yes --json
 mir-cli canvas node add-upscale --canvas-id <canvas_id> --upscale-resolution 4K --yes --json
 mir-cli canvas node add-smart-split --canvas-id <canvas_id> --split-rows 3 --split-cols 4 --upscale2k --yes --json
-mir-cli canvas node add-runninghub --canvas-id <canvas_id> --webapp-id <app_id> --api-key <saved_key_name> --values-json "{\"node|field\":\"value\"}" --yes --json
 ```
 
 Upload a local file you selected:

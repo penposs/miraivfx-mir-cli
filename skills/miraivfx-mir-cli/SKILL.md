@@ -18,7 +18,8 @@ Use this skill when the user asks an agent to operate Miraivfx projects, canvase
 4. Read full node parameters only when the user explicitly asks:
    - `mir-cli canvas inspect --canvas-id <canvas_id> --json`
 5. Before planning generation, read current capabilities and model metadata:
-   - `mir-cli canvas capabilities --json`
+   - `mir-cli canvas node types --json` (offline current nodes; retired types include migration guidance)
+   - `mir-cli canvas capabilities --json` (current CLI/server intersection)
    - `mir-cli canvas models --task image --json`
    - `mir-cli canvas models --task video --json`
    - `mir-cli canvas models --task audio --json` when creating music or song nodes.
@@ -63,10 +64,10 @@ Browser-based previs commands require an updated frontend origin (`--app-url`) a
 - Prefer direct flags over `--data-json` for common generation fields.
 - Treat node headers, width, height, and positions as visual appearance. Do not change them while filling node form fields unless the user explicitly asks for a layout or visual-label change.
 - Use `--node-title` only for intentional node header renames. Do not use `--title` for node headers.
-- Suno: `--lyrics`, `--song-title`, `--title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, `--instrumental`. For Suno, `--title` means song title; use `--node-title` only when intentionally renaming the canvas node header.
-- Image/video: `--ratio`/`--aspect-ratio`, `--resolution`/`--size`, `--duration`, `--negative-prompt`, `--video-service`, `--video-model`, `--video-size`.
-- Seedance video: `--ratio`, `--resolution`, `--duration`, `--api-key`, `--generate-audio`/`--no-audio`, `--real-person-mode`/`--no-real-person-mode`, `--conversion-slots`, `--seed`.
-- RunningHub: `--webapp-id`, `--api-key`, `--environment`, `--values-json`.
+- Suno: `--lyrics`, `--song-title`, `--title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, `--instrumental`/`--no-instrumental`. Versions accept V4.5+, V5 and V5.5. For Suno, `--title` means song title; use `--node-title` only when intentionally renaming the canvas node header.
+- Image: `--ratio`/`--aspect-ratio`, `--resolution`/`--size`, `--negative-prompt`.
+- Unified video (`seedance2`): `--ratio`/`--size`, `--resolution`, `--duration`, `--generate-audio`/`--no-audio`, `--first-last-frames`/`--no-first-last-frames`, `--return-last-frame`/`--no-return-last-frame`, `--seed`. Use the current model catalog for Seedance, Megaby and MiniMax choices. `seedance` is the prompt assistant.
+- Retired nodes cannot be created, updated or cloned. Inspect `canvas node types --json` for replacements; do not carry legacy provider parameters into unified video.
 - Action nodes: use `--upscale-resolution`, `--resize-mode`, `--resize-width`, `--resize-height`, `--split-rows`, `--split-cols`, `--source-video-url`, `--current-frame-time`, `--supplement-prompt`, and `--quality` when applicable.
 
 ## Canvas Layout And Asset Reuse Rules

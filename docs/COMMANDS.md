@@ -63,8 +63,8 @@ The CLI caches uploads by local file sha256 and project id. Use `--force-upload`
 
 ```powershell
 mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Planning note" --yes --json
-mir-cli canvas node add --canvas-id <canvas_id> --type video --prompt "A cinematic shot" --model <model_id> --yes --json
-mir-cli canvas node add-seedance-rh --canvas-id <canvas_id> --prompt "Video prompt" --ratio "16:9" --duration 12 --resolution 720p --yes --json
+mir-cli canvas node add --canvas-id <canvas_id> --type seedance2 --prompt "A cinematic shot" --model <model_id> --yes --json
+mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --prompt "Video prompt" --ratio "16:9" --duration 12 --resolution 720p --yes --json
 mir-cli canvas node add-suno --canvas-id <canvas_id> --song-title "Velvet Afterglow" --style "R&B, smooth soul" --lyrics "[Verse]..." --yes --json
 mir-cli canvas node add-reference-image --canvas-id <canvas_id> --url <uploaded_image_url> --yes --json
 ```
@@ -81,38 +81,37 @@ mir-cli canvas node add --canvas-id <canvas_id> --type text --content "Shot note
 
 For these atomic group writes only, an HTTP 5xx response triggers one read-only canvas verification and never a mutation retry. mir-cli checks the pre-generated node/group IDs; persisted IDs return `response_status: "committed_with_response_error"`, while missing IDs remain a command failure.
 
-Supported node types are reported by `mir-cli canvas capabilities --json`.
+Use `mir-cli canvas node types --json` for the offline current-node catalog. `mir-cli canvas capabilities --json` intersects that catalog with the server-supported types, retaining the original historical list as `server_safe_canvas_node_types`. Retired types cannot be added, updated or cloned; existing canvas content can still be inspected and deleted. See [the synchronization record](NODE_SYNC.md).
 
 ### Current unified video and depth nodes
 
 ```powershell
 mir-cli canvas models --task video --json
 mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --model <model_id> --prompt "Video prompt" --ratio 16:9 --duration 10 --resolution 720p --first-last-frames --dry-run --json
-mir-cli canvas node add-megaby-video --canvas-id <canvas_id> --model <model_id> --prompt "Video prompt" --ratio 9:16 --duration 5 --yes --json
 mir-cli canvas node add-depth-map --canvas-id <canvas_id> --depth-model small --depth-fps source --depth-max-side 1024 --depth-duration 15 --depth-style gray --yes --json
 mir-cli canvas node connect --canvas-id <canvas_id> --from-node <video_node_id> --to-node <depth_node_id> --yes --json
 ```
 
-`seedance2` is the unified video node, including the current Seedance 2.5, Megaby, and RunningHub H3 model families exposed by the web catalog. `megaby-video` remains available for compatible existing workflows. `add-seedance` / type `seedance` retains its legacy LLM behavior. Use `add-seedance2` for the unified video node.
+`seedance2` is the unified video node, including the current Seedance 2.5, Megaby, and RunningHub H3 model families exposed by the web catalog. `megaby-video` is retired as a separate node; select its available model on `seedance2`. `add-seedance` / type `seedance` creates the current Seedance prompt assistant. Use `add-seedance2` for the unified video node.
 
-Unified video maps `--ratio` / `--aspect-ratio` / `--size` to `size`, `--duration` / `--seconds` to numeric `duration`, and `--resolution` to `resolution`. Audio, first/last-frame mode and last-frame output use `--generate-audio` / `--no-audio`, `--first-last-frames` / `--no-first-last-frames`, and `--return-last-frame` / `--no-return-last-frame`. `--seed` accepts integers. These options depend on the chosen model; inspect its current schema with `canvas models`. Model-specific defaults remain with the website. Explicit `--model` values are checked against the account's available video models.
+Unified video maps `--ratio` / `--aspect-ratio` / `--size` to `size`, `--duration` / `--seconds` to numeric `duration`, and `--resolution` to `resolution`. Audio, first/last-frame mode and last-frame output use `--generate-audio` / `--no-audio`, `--first-last-frames` / `--no-first-last-frames`, and `--return-last-frame` / `--no-return-last-frame`. `--seed` accepts integers. These options depend on the chosen model; inspect its current schema with `canvas models`. Model-specific defaults remain with the website. Explicit model values, including `data.model`, are checked against the account's available unified-video families. Supplied ratio, resolution, duration, audio and seed values are checked against the published parameter schema when present. Unsupported family options are rejected.
 
 Depth options are written inside `depthSettings`: `--depth-model small|base`, `--depth-fps source|8|12|15|24|30`, `--depth-max-side 512|768|1024|2048`, `--depth-start` (0–180 seconds), `--depth-duration` (0.2–30 seconds), `--depth-style gray|inferno|viridis`, `--depth-temporal` (0–0.9), and `--depth-invert` / `--no-depth-invert`. Connect exactly one input video and run depth processing in the browser. Updating one depth option preserves the other saved depth settings.
 
-Image, video, and unified video nodes accept `--pre-llm` / `--no-pre-llm`, `--pre-llm-model`, and `--pre-llm-template-id`, `--pre-llm-template-name`, `--pre-llm-template-content`. LLM/agent nodes accept `--system-template-id`, `--system-template-name`, `--system-template-content`. These flags also work with `canvas node update`. Template fields store the supplied values; they do not fetch template content by ID. CLI commands prepare nodes; generation remains a manual web action.
+Image, panorama, and unified video nodes accept `--pre-llm` / `--no-pre-llm`, `--pre-llm-model`, and `--pre-llm-template-id`, `--pre-llm-template-name`, `--pre-llm-template-content`. LLM/agent nodes accept `--system-template-id`, `--system-template-name`, `--system-template-content`. These flags also work with `canvas node update`. Template fields store the supplied values; they do not fetch template content by ID. CLI commands prepare nodes; generation remains a manual web action.
 When `--x`/`--y` are omitted, the CLI picks a non-overlapping position from the current canvas. `add-reference-image` reuses an existing material node with the same URL by default; use `--force-new` or `--duplicate` only when a second visible copy is intentional.
-Use `add-suno` for music or song generation. It accepts `--lyrics`, `--song-title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, and `--instrumental`, and maps them to the Suno node fields used by the web canvas.
+Use `add-suno` for music or song generation. It accepts `--lyrics`, `--song-title`, `--style`/`--tags`, `--negative-tags`, `--description`, `--version`, `--mode`, and `--instrumental` / `--no-instrumental`, and maps them to the Suno node fields used by the web canvas.
+Suno versions accept `V4.5+`, `V5`, `V5.5` or `chirp-bluejay`, `chirp-crow`, `chirp-fenix`. The default is V5.5; partial updates preserve untouched version, model and instrumental fields. Invalid versions, modes and panorama quality values are rejected.
 For Suno nodes, `--title` is treated as the song title for compatibility. Node headers are visual labels; use `--node-title` only when you intentionally want to rename a canvas node header.
 
 Common direct field mappings:
 
-- Image/video nodes: `--aspect-ratio`/`--ratio`, `--resolution`/`--size`, `--duration`, `--negative-prompt`, `--video-service`, `--video-model`, `--video-size`, `--veo-mode`, `--veo-model`, `--veo-aspect-ratio`.
+- Image nodes: `--aspect-ratio`/`--ratio`, `--resolution`/`--size`, `--negative-prompt`.
 - LLM/agent/Seedance prompt nodes: `--mode`, `--system-prompt`, `--llm-model`, `--hide-output`.
-- Seedance video nodes: `--ratio`, `--resolution`, `--duration`, `--api-key`, `--generate-audio`/`--no-audio`, `--watermark`/`--no-watermark`, `--real-person-mode`/`--no-real-person-mode`, `--return-last-frame`, `--conversion-slots`, `--seed`.
+- Unified video: `--ratio`/`--size` (aspect ratio), `--resolution`, `--duration`, `--generate-audio`/`--no-audio`, `--first-last-frames`/`--no-first-last-frames`, `--return-last-frame`/`--no-return-last-frame`, `--seed`. Availability depends on the selected model. Legacy provider-specific options are rejected.
 - Action nodes: `add-upscale --upscale-resolution`, `add-resize --resize-mode --resize-width --resize-height`, `add-frame-extractor --source-video-url --current-frame-time`, `add-smart-split --split-rows --split-cols --upscale2k`, `add-panorama-gen --supplement-prompt --quality`.
-- RunningHub nodes: `--webapp-id`, `--api-key`, `--environment`, and `--values-json` map into `data.runninghub`.
 
-Common aliases include `add-text`, `add-video`, `add-audio`, `add-video-reference`, `add-agent`, `add-suno`, `add-seedance`, `add-seedance-volc`, `add-seedance-rh`, `add-vibex`, `add-runninghub`, `add-pro-camera`, `add-panorama-gen`, `add-blocking-3d`, `add-drawing-board`, `add-frame-extractor`, `add-upscale`, `add-resize`, `add-smart-split`, `add-panorama-split`, and `add-relay`.
+Common aliases include `add-text`, `add-seedance2`, `add-audio`, `add-video-reference`, `add-agent`, `add-suno`, `add-seedance`, `add-depth-map`, `add-pro-camera`, `add-panorama-gen`, `add-v-camera`, `add-drawing-board`, `add-frame-extractor`, `add-upscale`, `add-resize`, `add-smart-split`, `add-panorama-split`, and `add-relay`.
 
 ## Virtual Shoot
 

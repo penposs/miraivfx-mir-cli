@@ -1,3 +1,4 @@
+import { NODE_TITLES, NODE_ACTION_ALIASES, assertCurrentNodeType, assertCurrentNodeAction, nodeCatalog, currentCanvasCapabilities } from "../canvas/node-catalog.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -14,6 +15,11 @@ import { handleLocalSceneCommand, LOCAL_SCENE_COMMANDS } from "./v-camera-scene.
 
 export async function handleCanvasCommand(subcommand = "", args: string[]): Promise<void> {
   const asJson = hasFlag(args, "--json");
+  if (subcommand === "node" && args[0] === "types") {
+    json(nodeCatalog());
+    return;
+  }
+  if (subcommand === "node") assertCurrentNodeAction(args[0] ?? "");
   if (subcommand === "v-camera" && args[0] === "capabilities") {
     json(getVCameraCapabilities());
     return;
@@ -63,7 +69,8 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
 
   if (subcommand === "capabilities") {
     const response = await api.getJson<CapabilitiesResponse>("/canvas/capabilities");
-    json(response.data ?? response);
+    if (response.success === false) throw new Error("Could not read canvas capabilities");
+    json(currentCanvasCapabilities((response.data ?? response) as Record<string, unknown>));
     return;
   }
 
@@ -263,7 +270,8 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
             : `Added ${result.node_type} node ${result.node_id} to ${result.canvas_id}`);
       return;
     }
-    text("Usage: mir-cli canvas node <add|update|clone|delete|connect|disconnect|add-image|add-reference-image|add-text|add-video|add-audio|add-agent|add-suno|add-seedance|add-seedance2|add-megaby-video|add-depth-map|add-vibex|add-runninghub|add-pro-camera|add-panorama-gen|add-blocking-3d|add-v-camera>");
+    if (action && !["help", "--help", "-h"].includes(action)) throw new Error(`Unknown canvas node command: ${action}. Use canvas node types --json.`);
+    text(`Usage: mir-cli canvas node <types|add|update|clone|delete|connect|disconnect|add-image|add-reference-image|${Object.keys(NODE_ACTION_ALIASES).join("|")}>`);
     return;
   }
 
@@ -292,78 +300,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
   text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|node|group|v-camera>");
 }
 
-const CANVAS_NODE_TYPES = new Set([
-  "text",
-  "image-item",
-  "video-item",
-  "image",
-  "video",
-  "seedance2",
-  "megaby-video",
-  "depth-map",
-  "seedance-volc",
-  "seedance2-rh-standard",
-  "vibex-webapp",
-  "frame-extractor",
-  "llm",
-  "agent",
-  "seedance",
-  "suno",
-  "relay",
-  "upscale",
-  "runninghub",
-  "seedance2-runninghub",
-  "sora2-runninghub",
-  "rh-config",
-  "rh-param",
-  "rh-main",
-  "drawing-board",
-  "pro-camera",
-  "smart-split",
-  "panorama-split",
-  "panorama-gen",
-  "blocking-3d",
-  "v-camera",
-  "audio",
-  "file",
-  "resize",
-]);
-
 const MATERIAL_NODE_TYPES = new Set(["image-item", "video-item", "audio", "file", "text"]);
-const VIBEX_SEEDANCE_APP_URL =
-  "https://vibex.runninghub.cn/p/app-9105545b19ba4f339164bd5125d177a9/?inviteCode=rh-v1118&mvfxBridge=20260626-sso-callback&mvfxNode=1";
-
-const NODE_ACTION_ALIASES: Record<string, string> = {
-  "add-text": "text",
-  "add-video": "video",
-  "add-audio": "audio",
-  "add-video-reference": "video-item",
-  "add-audio-reference": "audio",
-  "add-file": "file",
-  "add-agent": "agent",
-  "add-llm": "llm",
-  "add-suno": "suno",
-  "add-seedance": "seedance",
-  "add-seedance2": "seedance2",
-  "add-megaby-video": "megaby-video",
-  "add-depth-map": "depth-map",
-  "add-seedance-volc": "seedance-volc",
-  "add-seedance-rh": "seedance2-rh-standard",
-  "add-vibex": "vibex-webapp",
-  "add-vibex-webapp": "vibex-webapp",
-  "add-runninghub": "runninghub",
-  "add-pro-camera": "pro-camera",
-  "add-panorama-gen": "panorama-gen",
-  "add-blocking-3d": "blocking-3d",
-  "add-v-camera": "v-camera",
-  "add-drawing-board": "drawing-board",
-  "add-frame-extractor": "frame-extractor",
-  "add-upscale": "upscale",
-  "add-resize": "resize",
-  "add-smart-split": "smart-split",
-  "add-panorama-split": "panorama-split",
-  "add-relay": "relay",
-};
 
 function manualWebOnlyPayload(command: string): { ok: false; command: string; code: string; message: string } {
   return {
@@ -766,9 +703,7 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
   const shouldOpen = hasFlag(args, "--open");
   const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
   const nodeType = requireValue(getFlagValue(args, "--type"), "--type");
-  if (!CANVAS_NODE_TYPES.has(nodeType)) {
-    throw new Error(`Unsupported node type: ${nodeType}`);
-  }
+  assertCurrentNodeType(nodeType);
   const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt") ?? "";
   const rawTitle = getFlagValue(args, "--title");
   const title = getFlagValue(args, "--node-title") ?? defaultTitleForNode(nodeType);
@@ -792,6 +727,9 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
   const model = getFlagValue(args, "--model");
   const dataJson = parseSettings(getFlagValue(args, "--data-json")) ?? {};
   const nodeData = normalizeNodeDataForType(nodeType, args, content, rawTitle, dataJson);
+  if (nodeType === "depth-map") {
+    nodeData.depthSettings = { ...DEPTH_DEFAULTS, ...(nodeData.depthSettings as Record<string, unknown> | undefined) };
+  }
   const settings = parseSettings(getFlagValue(args, "--settings-json"));
   const connectTo = getFlagValue(args, "--connect-to");
 
@@ -802,7 +740,9 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
     throw new Error("Create the Virtual Shoot node first, then use 'mir-cli canvas v-camera' commands to configure it");
   }
 
-  if (model) {
+  if (nodeType === "seedance2") {
+    await validateUnifiedVideoData(api, { ...nodeData, ...(model ? { model } : {}) });
+  } else if (model) {
     const modelTask = modelTaskForNode(nodeType);
     if (modelTask) await assertModelAvailable(api, modelTask, model);
   }
@@ -1126,6 +1066,7 @@ export async function updateCanvasNode(api: ApiClient, args: string[], appBase: 
   const model = getFlagValue(args, "--model");
 
   const nodeType = String((node as any).type || "");
+  assertCurrentNodeType(nodeType);
   if (
     nodeType === "v-camera"
     && (dataJson || settings || model || content !== undefined || rawTitle !== undefined)
@@ -1140,11 +1081,14 @@ export async function updateCanvasNode(api: ApiClient, args: string[], appBase: 
   if (width !== undefined) patch.width = width;
   if (height !== undefined) patch.height = height;
 
-  if (model) {
+  if (model && nodeType !== "seedance2") {
     const modelTask = modelTaskForNode(nodeType);
     if (modelTask) await assertModelAvailable(api, modelTask, model);
   }
-  const normalizedDataPatch = normalizeNodeDataForType(nodeType, args, content ?? "", rawTitle ?? title, dataJson ?? {});
+  const normalizedDataPatch = normalizeNodeDataForType(nodeType, args, content ?? "", rawTitle ?? title, dataJson ?? {}, true);
+  if (nodeType === "seedance2" && (model || Object.keys(normalizedDataPatch).length)) {
+    await validateUnifiedVideoData(api, normalizedDataPatch, model ?? firstString(normalizedDataPatch.model, (node.data as Record<string, unknown> | undefined)?.model));
+  }
   if (nodeType === "depth-map" && normalizedDataPatch.depthSettings) {
     normalizedDataPatch.depthSettings = {
       ...(((node.data as Record<string, unknown> | undefined)?.depthSettings as Record<string, unknown> | undefined) ?? {}),
@@ -1182,7 +1126,7 @@ async function deleteCanvasNode(api: ApiClient, args: string[], appBase: string)
   return { ...result, node_id: nodeId };
 }
 
-async function cloneCanvasNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
+export async function cloneCanvasNode(api: ApiClient, args: string[], appBase: string): Promise<Record<string, unknown>> {
   if (!hasFlag(args, "--yes")) {
     throw new Error("Cloning a canvas node requires explicit --yes");
   }
@@ -1190,6 +1134,7 @@ async function cloneCanvasNode(api: ApiClient, args: string[], appBase: string):
   const sourceNodeId = requireValue(getFlagValue(args, "--node-id") ?? getFlagValue(args, "--source-node"), "--node-id");
   const canvas = await getCanvasData(api, canvasId);
   const source = findCanvasNode(canvas, sourceNodeId) as unknown as CanvasNodeRecord;
+  assertCurrentNodeType(String(source.type));
   const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
   const requestedY = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
   const shape = {
@@ -1574,7 +1519,7 @@ function hasConnection(canvas: CanvasData, fromNode: string, toNode: string): bo
   });
 }
 
-async function assertModelAvailable(api: ApiClient, task: string, modelId: string): Promise<void> {
+async function assertModelAvailable(api: ApiClient, task: string, modelId: string): Promise<Record<string, unknown>> {
   const response = await api.getJson<ModelsResponse>(`/canvas/models?task=${encodeURIComponent(task)}`);
   const models = normalizeModels(response, task);
   const match = models.find((model) => model.model_id === modelId);
@@ -1583,6 +1528,42 @@ async function assertModelAvailable(api: ApiClient, task: string, modelId: strin
   }
   if (match.enabled === false || match.maintenance === true) {
     throw new Error(`Model is not currently usable: ${modelId}`);
+  }
+  return match;
+}
+
+async function validateUnifiedVideoData(api: ApiClient, data: Record<string, unknown>, selectedModel?: string): Promise<void> {
+  const modelId = selectedModel ?? firstString(data.model);
+  // With no explicit model, the web node resolves its current catalog defaults.
+  if (!modelId) return;
+  const model = await assertModelAvailable(api, "video", modelId);
+  const schema = model.parameter_schema as Record<string, any>;
+  const hints = model.ui_hints as Record<string, unknown>;
+  const discount = modelId.startsWith("seedance2-");
+  const subsidy = modelId.startsWith("megaby-video-") || modelId.startsWith("megaby-custom-") || hints?.megaby_video || schema?.x_megaby_video;
+  const h3 = modelId.startsWith("runninghub-h3-");
+  if (!discount && !subsidy && !h3) throw new Error(`Model ${modelId} is not supported by the unified video node`);
+  const unsupported = discount ? ["megabyReferenceVideoMeta"] : [
+    "generate_audio", "use_first_last_frames", "return_last_frame", "seed", "seedanceReferenceVideoMeta",
+    ...(h3 ? ["megabyReferenceVideoMeta"] : []),
+  ];
+  for (const key of unsupported) {
+    if (data[key] !== undefined && data[key] !== null) throw new Error(`Parameter ${key} is not supported by ${modelId}`);
+  }
+  const properties = schema?.properties;
+  if (!properties || typeof properties !== "object") return;
+  for (const key of ["size", "resolution", "duration", "generate_audio", "seed"]) {
+    const value = data[key];
+    if (value === undefined || value === null) continue;
+    const property = key === "size" ? properties.size ?? properties.ratio : properties[key];
+    if (!property) throw new Error(`Parameter ${key} is not supported by ${modelId}`);
+    if (Array.isArray(property.enum) && !property.enum.some((item: unknown) => String(item) === String(value))) {
+      throw new Error(`Invalid ${key} for ${modelId}: expected ${property.enum.join(", ")}`);
+    }
+    if ((typeof property.minimum === "number" && Number(value) < property.minimum)
+      || (typeof property.maximum === "number" && Number(value) > property.maximum)) {
+      throw new Error(`Invalid ${key} for ${modelId}: outside the model parameter range`);
+    }
   }
 }
 
@@ -1602,7 +1583,7 @@ function normalizeModels(response: ModelsResponse, task: string): Array<Record<s
     }
   }
   return rows
-    .filter((model) => task === "all" || model.model_type === task || model.type === task || model.capabilities?.includes?.(task))
+    .filter((model) => task === "all" || model.task === task || model.model_type === task || model.type === task || model.capabilities?.includes?.(task))
     .map((model) => ({
       model_id: model.id,
       display_name: model.label ?? model.name ?? model.id,
@@ -1613,6 +1594,7 @@ function normalizeModels(response: ModelsResponse, task: string): Array<Record<s
       maintenance: model.maintenance ?? model.is_maintenance ?? false,
       cost_per_unit: model.cost_per_unit,
       parameter_schema: model.paramSchema ?? model.param_schema ?? {},
+      ui_hints: model.uiHints ?? model.ui_hints ?? {},
     }));
 }
 
@@ -1649,65 +1631,24 @@ function looksLikeUrl(value: string): boolean {
 }
 
 function defaultShapeForNode(type: string): { width: number; height: number } {
-  if (type === "seedance2" || type === "megaby-video") return { width: 420, height: 580 };
+  if (type === "seedance2") return { width: 420, height: 580 };
   if (type === "depth-map") return { width: 380, height: 520 };
   if (type === "relay") return { width: 50, height: 50 };
-  if (type === "text" || type === "llm" || type === "agent" || type === "seedance") {
+  if (type === "text" || type === "agent" || type === "seedance") {
     return { width: 320, height: type === "agent" || type === "seedance" ? 420 : 280 };
   }
   if (type === "pro-camera" || type === "image") return { width: 600, height: 360 };
-  if (type === "video") return { width: 500, height: 260 };
   if (type === "suno") return { width: 440, height: 560 };
   if (type === "panorama-split") return { width: 360, height: 420 };
   if (type === "panorama-gen") return { width: 360, height: 320 };
-  if (type === "blocking-3d") return { width: 640, height: 520 };
   if (type === "v-camera") return { width: 860, height: 640 };
-  if (type === "runninghub" || type === "seedance2-runninghub" || type === "sora2-runninghub") return { width: 340, height: 520 };
-  if (type === "vibex-webapp") return { width: 860, height: 640 };
-  if (type === "seedance-volc" || type === "seedance2-rh-standard") return { width: 420, height: 580 };
   if (type === "video-item") return { width: 320, height: 240 };
   if (type === "audio") return { width: 300, height: 100 };
   return { width: 280, height: 280 };
 }
 
 function defaultTitleForNode(type: string): string | undefined {
-  const titles: Record<string, string> = {
-    text: "文本便签",
-    image: "AI 生图",
-    "image-item": "参考图",
-    video: "视频生成",
-    "video-item": "视频素材",
-    audio: "音频素材",
-    file: "文件素材",
-    agent: "LLM生成器",
-    llm: "LLM",
-    seedance: "Seedance 2.0",
-    seedance2: "特惠视频生成 seedance minimax",
-    "megaby-video": "Megaby 视频",
-    "depth-map": "深度视频",
-    suno: "Suno 音乐",
-    "seedance-volc": "seedance2.0-火山版",
-    "seedance2-rh-standard": "seedance2.0-RH版",
-    "vibex-webapp": "seedance2.0限时7.5折",
-    runninghub: "RunningHub",
-    "seedance2-runninghub": "Seedance RunningHub",
-    "sora2-runninghub": "Sora RunningHub",
-    "pro-camera": "专业相机",
-    "panorama-gen": "全景图生成",
-    "panorama-split": "全景预览",
-    "blocking-3d": "站位图",
-    "v-camera": "虚拟实拍",
-    "drawing-board": "画板",
-    "frame-extractor": "抽帧",
-    upscale: "超分",
-    resize: "调整尺寸",
-    "smart-split": "智能切分",
-    relay: "集线器",
-    "rh-main": "RH 主节点",
-    "rh-param": "RH 参数",
-    "rh-config": "RH 配置",
-  };
-  return titles[type];
+  return NODE_TITLES[type];
 }
 
 function defaultStatusForNode(type: string, content: string): "idle" | "completed" {
@@ -1717,45 +1658,12 @@ function defaultStatusForNode(type: string, content: string): "idle" | "complete
 
 function defaultDataForNode(type: string): Record<string, unknown> {
   // Model-specific defaults are resolved by the current web model catalog.
-  if (type === "seedance2" || type === "megaby-video") return {};
+  if (type === "seedance2") return {};
   if (type === "suno") {
     return { sunoModel: "suno", sunoVersion: "chirp-fenix", sunoMode: "description", sunoInstrumental: false };
   }
-  if (type === "seedance-volc") {
-    return { model: "seedance2.0-full", ratio: "16:9", resolution: "720p", duration: 5, watermark: false, generate_audio: true };
-  }
-  if (type === "seedance2-rh-standard") {
-    return {
-      model: "seedance2.0-full",
-      ratio: "adaptive",
-      resolution: "720p",
-      duration: "5",
-      generateAudio: true,
-      realPersonMode: true,
-      conversionSlots: ["all"],
-      returnLastFrame: false,
-      seed: -1,
-    };
-  }
-  if (type === "vibex-webapp") {
-    return {
-      webApp: {
-        appUrl: VIBEX_SEEDANCE_APP_URL,
-        provider: "vibex",
-        authMode: "runninghub-user-login",
-      },
-      ratio: "adaptive",
-      resolution: "720p",
-      duration: "5",
-      generateAudio: true,
-      returnLastFrame: false,
-    };
-  }
   if (type === "panorama-gen") {
     return { panoramaSupplementPrompt: "", panoramaQuality: "2k" };
-  }
-  if (type === "blocking-3d") {
-    return { blockingAspect: "16:9" };
   }
   if (type === "v-camera") {
     return {};
@@ -1778,9 +1686,10 @@ function normalizeNodeDataForType(
   content: string,
   nodeTitle: string | undefined,
   data: Record<string, unknown>,
+  partial = false,
 ): Record<string, unknown> {
   const normalized = { ...data };
-  if (["image", "video", "seedance2", "megaby-video"].includes(type)) {
+  if (["image", "seedance2", "panorama-gen"].includes(type)) {
     Object.assign(normalized, booleanPairFlag(args, "--pre-llm", "--no-pre-llm", "preLlmEnabled"));
     for (const [flag, field] of [
       ["--pre-llm-model", "preLlmModel"],
@@ -1793,17 +1702,11 @@ function normalizeNodeDataForType(
     }
   }
 
-  if (type === "seedance2" || type === "megaby-video") return normalizeUnifiedVideoData(args, normalized);
+  if (type === "seedance2") return normalizeUnifiedVideoData(args, normalized);
   if (type === "depth-map") return normalizeDepthData(args, normalized);
-  if (type === "suno") return normalizeSunoData(args, content, nodeTitle, normalized);
+  if (type === "suno") return normalizeSunoData(args, content, nodeTitle, normalized, partial);
   if (type === "image") return normalizeImageData(args, normalized);
-  if (type === "video") return normalizeVideoData(args, normalized);
-  if (type === "llm" || type === "agent" || type === "seedance") return normalizeLlmData(args, normalized);
-  if (type === "seedance-volc" || type === "seedance2-rh-standard") return normalizeSeedanceVideoData(type, args, normalized);
-  if (type === "vibex-webapp") return normalizeVibexData(args, normalized);
-  if (type === "runninghub" || type === "seedance2-runninghub" || type === "sora2-runninghub") {
-    return normalizeRunningHubData(args, normalized);
-  }
+  if (type === "agent" || type === "seedance") return normalizeLlmData(args, normalized);
   if (type === "upscale") return normalizeUpscaleData(args, normalized);
   if (type === "resize") return normalizeResizeData(args, normalized);
   if (type === "frame-extractor") return normalizeFrameExtractorData(args, content, normalized);
@@ -1818,6 +1721,7 @@ function normalizeSunoData(
   content: string,
   _nodeTitle: string | undefined,
   data: Record<string, unknown>,
+  partial = false,
 ): Record<string, unknown> {
   const lyrics = firstString(
     getFlagValue(args, "--lyrics"),
@@ -1853,25 +1757,28 @@ function normalizeSunoData(
     data.gpt_description_prompt,
     content,
   );
-  const version = firstString(getFlagValue(args, "--version"), data.sunoVersion, data.mv, "chirp-fenix");
-  const model = firstString(getFlagValue(args, "--model"), data.sunoModel, data.model, "suno");
+  const rawVersion = firstString(getFlagValue(args, "--version"), data.sunoVersion, data.mv, partial ? undefined : "chirp-fenix");
+  const versions: Record<string, string> = { "v4.5+": "chirp-bluejay", "v5": "chirp-crow", "v5.5": "chirp-fenix" };
+  const version = rawVersion ? versions[rawVersion.toLowerCase()] ?? rawVersion : undefined;
+  if (version && !Object.values(versions).includes(version)) throw new Error("Invalid Suno version: use V4.5+, V5, V5.5 or its chirp ID");
+  const model = firstString(getFlagValue(args, "--model"), data.sunoModel, data.model, partial ? undefined : "suno");
   const instrumental = hasFlag(args, "--instrumental")
     ? true
-    : data.sunoInstrumental ?? data.make_instrumental ?? false;
+    : hasFlag(args, "--no-instrumental") ? false : data.sunoInstrumental ?? data.make_instrumental ?? (partial ? undefined : false);
   const explicitMode = firstString(getFlagValue(args, "--mode"), data.sunoMode, data.mode);
+  if (explicitMode && !["description", "custom"].includes(explicitMode)) throw new Error("Invalid Suno mode: use description or custom");
   const mode = explicitMode === "description" || explicitMode === "custom"
     ? explicitMode
     : lyrics || songTitle || tags
       ? "custom"
-      : "description";
+      : description || !partial ? "description" : undefined;
 
   return {
     ...data,
-    model,
-    sunoModel: model,
-    sunoVersion: version,
-    sunoMode: mode,
-    sunoInstrumental: Boolean(instrumental),
+    ...(model ? { model, sunoModel: model } : {}),
+    ...(version ? { sunoVersion: version } : {}),
+    ...(mode ? { sunoMode: mode } : {}),
+    ...(instrumental !== undefined ? { sunoInstrumental: Boolean(instrumental) } : {}),
     ...(description ? { sunoDescription: description, gpt_description_prompt: description } : {}),
     ...(songTitle ? { sunoTitle: songTitle, title: songTitle } : {}),
     ...(tags ? { sunoTags: tags, sunoStyle: tags, tags } : {}),
@@ -1892,30 +1799,6 @@ function normalizeImageData(args: string[], data: Record<string, unknown>): Reco
     ...(resolution ? { resolution } : {}),
     ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
     ...(pendingRefImage ? { pendingRefImage } : {}),
-    ...booleanFlag(args, "--pre-llm", "preLlmEnabled"),
-  };
-}
-
-function normalizeVideoData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const duration = firstString(getFlagValue(args, "--duration"), getFlagValue(args, "--seconds"), data.duration);
-  const videoService = firstString(getFlagValue(args, "--service"), getFlagValue(args, "--video-service"), data.videoService);
-  const videoModel = firstString(getFlagValue(args, "--video-model"), data.videoModel);
-  const videoSize = firstString(getFlagValue(args, "--video-size"), getFlagValue(args, "--size"), data.videoSize);
-  const veoMode = firstString(getFlagValue(args, "--veo-mode"), data.veoMode);
-  const veoModel = firstString(getFlagValue(args, "--veo-model"), data.veoModel);
-  const veoAspectRatio = firstString(getFlagValue(args, "--veo-aspect-ratio"), getFlagValue(args, "--aspect-ratio"), getFlagValue(args, "--ratio"), data.veoAspectRatio);
-
-  return {
-    ...data,
-    ...(duration ? { duration, videoSeconds: duration } : {}),
-    ...(videoService === "sora" || videoService === "veo" ? { videoService } : {}),
-    ...(videoModel ? { videoModel } : {}),
-    ...(videoSize ? { videoSize } : {}),
-    ...(veoMode ? { veoMode } : {}),
-    ...(veoModel ? { veoModel } : {}),
-    ...(veoAspectRatio ? { veoAspectRatio } : {}),
-    ...booleanFlag(args, "--veo-enhance-prompt", "veoEnhancePrompt"),
-    ...booleanFlag(args, "--veo-enable-upsample", "veoEnableUpsample"),
     ...booleanFlag(args, "--pre-llm", "preLlmEnabled"),
   };
 }
@@ -1943,7 +1826,10 @@ function normalizeLlmData(args: string[], data: Record<string, unknown>): Record
 }
 
 function normalizeUnifiedVideoData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const size = firstString(getFlagValue(args, "--ratio"), getFlagValue(args, "--aspect-ratio"), getFlagValue(args, "--size"), data.size);
+  for (const flag of ["--api-key", "--apikey", "--real-person-mode", "--no-real-person-mode", "--conversion-slots", "--watermark", "--no-watermark", "--video-service", "--video-model", "--video-size", "--veo-mode", "--veo-model", "--veo-aspect-ratio"]) {
+    if (hasFlag(args, flag)) throw new Error(`Legacy video option ${flag} is not supported; use canvas models --task video for current parameters`);
+  }
+  const size = firstString(getFlagValue(args, "--ratio"), getFlagValue(args, "--aspect-ratio"), getFlagValue(args, "--size"), data.size, data.ratio, data.aspectRatio);
   const resolution = firstString(getFlagValue(args, "--resolution"), data.resolution);
   const rawDuration = firstString(getFlagValue(args, "--duration"), getFlagValue(args, "--seconds"), data.duration === undefined ? undefined : String(data.duration));
   const duration = parseOptionalNumber(rawDuration, "--duration");
@@ -1964,6 +1850,11 @@ function normalizeUnifiedVideoData(args: string[], data: Record<string, unknown>
   };
 }
 
+const DEPTH_DEFAULTS = {
+  model: "small", fps: 30, maxSide: 512, startSeconds: 0,
+  durationSeconds: 30, style: "gray", invert: false, temporal: 0.35,
+};
+
 function normalizeDepthData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
   const current = data.depthSettings;
   if (current !== undefined && (!current || typeof current !== "object" || Array.isArray(current))) {
@@ -1976,7 +1867,8 @@ function normalizeDepthData(args: string[], data: Record<string, unknown>): Reco
     ["--depth-fps", "fps", ["source", "8", "12", "15", "24", "30"]],
     ["--depth-max-side", "maxSide", ["512", "768", "1024", "2048"]],
   ] as const) {
-    const value = getFlagValue(args, flag);
+    const supplied = getFlagValue(args, flag) ?? settings[field];
+    const value = supplied === undefined ? undefined : String(supplied);
     if (value === undefined) continue;
     if (!(allowed as readonly string[]).includes(value)) throw new Error(`Invalid ${flag}: expected ${allowed.join(", ")}`);
     settings[field] = field === "maxSide" || (field === "fps" && value !== "source") ? Number(value) : value;
@@ -1986,69 +1878,15 @@ function normalizeDepthData(args: string[], data: Record<string, unknown>): Reco
     ["--depth-duration", "durationSeconds", 0.2, 30],
     ["--depth-temporal", "temporal", 0, 0.9],
   ] as const) {
-    const value = parseOptionalNumber(getFlagValue(args, flag), flag);
+    const supplied = getFlagValue(args, flag) ?? settings[field];
+    const value = parseOptionalNumber(supplied === undefined ? undefined : String(supplied), flag);
     if (value === undefined) continue;
     if (value < min || value > max) throw new Error(`Invalid ${flag}: expected ${min} to ${max}`);
     settings[field] = value;
   }
   Object.assign(settings, booleanPairFlag(args, "--depth-invert", "--no-depth-invert", "invert"));
+  if (settings.invert !== undefined && typeof settings.invert !== "boolean") throw new Error("Invalid depth invert: expected a boolean");
   return Object.keys(settings).length ? { ...data, depthSettings: settings } : data;
-}
-
-function normalizeSeedanceVideoData(type: string, args: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const ratio = firstString(getFlagValue(args, "--ratio"), getFlagValue(args, "--aspect-ratio"), data.ratio, data.aspectRatio);
-  const resolution = firstString(getFlagValue(args, "--resolution"), getFlagValue(args, "--size"), data.resolution);
-  const duration = firstString(getFlagValue(args, "--duration"), getFlagValue(args, "--seconds"), data.duration);
-  const apiKey = firstString(getFlagValue(args, "--api-key"), getFlagValue(args, "--apikey"), data.apiKey);
-  const conversionSlots = parseCsv(firstString(getFlagValue(args, "--conversion-slots"), data.conversionSlots));
-  const seed = parseOptionalNumber(getFlagValue(args, "--seed"), "--seed");
-
-  return {
-    ...data,
-    ...(ratio ? { ratio, aspectRatio: ratio } : {}),
-    ...(resolution ? { resolution } : {}),
-    ...(duration ? { duration } : {}),
-    ...(apiKey ? { apiKey } : {}),
-    ...(conversionSlots ? { conversionSlots } : {}),
-    ...(seed !== undefined ? { seed } : {}),
-    ...booleanPairFlag(args, "--generate-audio", "--no-audio", type === "seedance-volc" ? "generate_audio" : "generateAudio"),
-    ...booleanPairFlag(args, "--watermark", "--no-watermark", "watermark"),
-    ...booleanPairFlag(args, "--real-person-mode", "--no-real-person-mode", "realPersonMode"),
-    ...booleanFlag(args, "--return-last-frame", "returnLastFrame"),
-  };
-}
-
-function normalizeVibexData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const appUrl = firstString(getFlagValue(args, "--app-url"), getFlagValue(args, "--webapp-url"));
-  const authState = firstString(getFlagValue(args, "--auth-state"), data.webApp && (data.webApp as Record<string, unknown>).authState);
-  const webApp = {
-    ...((data.webApp && typeof data.webApp === "object" && !Array.isArray(data.webApp)) ? data.webApp as Record<string, unknown> : {}),
-    ...(appUrl ? { appUrl } : {}),
-    ...(authState ? { authState } : {}),
-  };
-  return Object.keys(webApp).length ? { ...data, webApp } : data;
-}
-
-function normalizeRunningHubData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
-  const current = (data.runninghub && typeof data.runninghub === "object" && !Array.isArray(data.runninghub))
-    ? data.runninghub as Record<string, unknown>
-    : {};
-  const webappId = firstString(getFlagValue(args, "--webapp-id"), getFlagValue(args, "--app-id"), current.webappId, data.webappId);
-  const apiKey = firstString(getFlagValue(args, "--api-key"), getFlagValue(args, "--apikey"), current.apiKey);
-  const environment = firstString(getFlagValue(args, "--environment"), getFlagValue(args, "--env"), current.environment);
-  const values = parseSettings(getFlagValue(args, "--values-json"));
-  const runninghub = {
-    ...current,
-    ...(webappId ? { webappId } : {}),
-    ...(apiKey ? { apiKey } : {}),
-    ...(environment ? { environment } : {}),
-    ...(values ? { values: { ...((current.values && typeof current.values === "object") ? current.values as Record<string, unknown> : {}), ...values } } : {}),
-  };
-  return {
-    ...data,
-    ...(webappId ? { webappId } : {}),
-    runninghub,
-  };
 }
 
 function normalizeUpscaleData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
@@ -2103,6 +1941,7 @@ function normalizeSmartSplitData(args: string[], data: Record<string, unknown>):
 function normalizePanoramaGenData(args: string[], data: Record<string, unknown>): Record<string, unknown> {
   const supplementPrompt = firstString(getFlagValue(args, "--supplement-prompt"), getFlagValue(args, "--panorama-prompt"), data.panoramaSupplementPrompt);
   const quality = firstString(getFlagValue(args, "--quality"), getFlagValue(args, "--panorama-quality"), data.panoramaQuality);
+  if (quality && quality !== "2k" && quality !== "4k") throw new Error("Invalid panorama quality: use 2k or 4k");
   return {
     ...data,
     ...(supplementPrompt ? { panoramaSupplementPrompt: supplementPrompt } : {}),
@@ -2147,16 +1986,16 @@ function materialDataForNode(type: string, url: string): Record<string, unknown>
 }
 
 function modelDataForNode(type: string, model: string): Record<string, unknown> {
-  if (type === "agent" || type === "llm" || type === "seedance") return { llmModel: model };
+  if (type === "agent" || type === "seedance") return { llmModel: model };
   if (type === "suno") return { sunoModel: model };
   return { model };
 }
 
 function modelTaskForNode(type: string): string | undefined {
   if (type === "image" || type === "panorama-gen" || type === "upscale") return "image";
-  if (type === "video" || type === "seedance2" || type === "megaby-video" || type === "seedance-volc" || type === "seedance2-rh-standard") return "video";
+  if (type === "seedance2") return "video";
   if (type === "suno") return "audio";
-  if (type === "agent" || type === "llm" || type === "seedance") return "llm";
+  if (type === "agent" || type === "seedance") return "llm";
   return undefined;
 }
 
