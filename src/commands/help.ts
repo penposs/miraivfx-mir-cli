@@ -15,6 +15,9 @@ Usage:
   mir-cli canvas open --canvas-id <canvas_id>
   mir-cli canvas node types --json
   mir-cli canvas capabilities --json
+  mir-cli canvas templates list --json
+  mir-cli canvas templates list --task video --json
+  mir-cli canvas templates show multi-reference-video --json
   mir-cli canvas models --task image --json
   mir-cli canvas inspect --canvas-id <canvas_id> --summary
   mir-cli canvas results list --canvas-id <canvas_id> --json
@@ -52,5 +55,6 @@ Usage:
   mir-cli canvas v-camera cut add --canvas-id <canvas_id> --camera "camera_a" --time 4.5 --yes --json
   mir-cli canvas upload --project-id <project_id> --file ./ref.png --allow-upload --json
 
+Before building a generation workflow, read canvas templates: four offline blueprints explain which nodes to use and how to connect them. Adapt their prompts and references; do not copy historical outputs.
 Canvas result commands only read completed final media from one explicit canvas. Generation submission remains a manual web action.`);
 }

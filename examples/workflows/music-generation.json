@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "music-generation",
+  "title": "音乐生成",
+  "task": "audio",
+  "intents": ["音乐生成", "歌曲", "配乐", "Suno", "music", "song"],
+  "source": {
+    "repository": "miraivfx-saas",
+    "path": "frontend/public/canvas-templates/music-generation.json",
+    "sha256": "b34396a7c4f1fe5a3b5088300c9426ee3eb80b267ac7850db120cdaef23284b1",
+    "adaptation": "保留 suno → 两个 audio 输出的原范例结构；移除歌曲、媒体、剪辑、任务、进度和完成状态，输出数量仅作示意。"
+  },
+  "guidance": [
+    "suno 是音乐生成节点；audio 是音频素材或结果节点，不会生成音乐；text 只适合用户需要的便签。",
+    "歌词、曲名、风格直接填写在 suno，不需要为了传歌词而先创建 text 节点。",
+    "本范例为 custom 歌词模式。纯音乐用 --instrumental 并去掉歌词；简单描述模式用 --mode description --description。",
+    "先读取 canvas models --task audio 和当前 Suno 版本支持；不要复制旧任务的 sunoClips、sunoTaskId 或完成状态。",
+    "本范例有两个 audio 结果，但新任务输出数量以实际成功结果为准；搭建时不创建任何结果节点。"
+  ],
+  "nodes": [
+    {
+      "id": "music-generator", "type": "suno", "role": "generation",
+      "purpose": "填写歌词、风格和曲名，准备音乐生成", "x": 0, "y": 0,
+      "cli_args": ["--mode", "custom", "--song-title", "{{song_title}}", "--style", "{{music_style}}", "--lyrics", "{{lyrics}}"]
+    },
+    {"id": "audio-result-1", "type": "audio", "role": "generated-result", "purpose": "原范例的第一个真实音频结果"},
+    {"id": "audio-result-2", "type": "audio", "role": "generated-result", "purpose": "原范例的第二个真实音频结果，数量不保证"}
+  ],
+  "connections": [
+    {"fromNode": "music-generator", "toNode": "audio-result-1", "phase": "generated-result"},
+    {"fromNode": "music-generator", "toNode": "audio-result-2", "phase": "generated-result"}
+  ]
+}

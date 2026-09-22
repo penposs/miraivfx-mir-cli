@@ -61,6 +61,11 @@ export function nodeCatalog() {
     sidebar_node_types: SIDEBAR_NODE_TYPES,
     aliases: NODE_ACTION_ALIASES,
     retired_node_types: RETIRED_NODE_TYPES,
+    workflow_templates: {
+      list_command: "mir-cli canvas templates list --json",
+      show_command: "mir-cli canvas templates show <template-id> --json",
+      guide: "Select a workflow blueprint before choosing generation nodes and wiring references. Templates are examples; current model metadata controls supported inputs and parameters.",
+    },
   };
 }
 
@@ -75,5 +80,6 @@ export function currentCanvasCapabilities(server: Record<string, unknown>) {
     sidebar_node_types: SIDEBAR_NODE_TYPES.filter(type => available.includes(type)),
     cli_node_types: nodeCatalog().node_types.filter(node => available.includes(node.type)),
     retired_node_types: RETIRED_NODE_TYPES,
+    workflow_templates: nodeCatalog().workflow_templates,
   };
 }

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "story-script",
+  "title": "故事脚本生成",
+  "task": "llm",
+  "intents": ["故事", "剧本", "分集大纲", "分镜脚本", "story", "script"],
+  "source": {
+    "repository": "miraivfx-saas",
+    "path": "frontend/public/canvas-templates/story-script.json",
+    "sha256": "9f33046864a08a6745b00165135868d1273559fe6f73ff2658e8708b5d3bdeb7",
+    "adaptation": "保留两级 agent 及各自 text 输出的拓扑；移除原剧本、系统提示词长文、历史输出和完成状态，改为用户需求参数。"
+  },
+  "guidance": [
+    "agent 才是提示词/剧本生成节点，text 只是文本素材或便签。不要用已退役的 llm 类型。",
+    "先创建大纲 agent 和单集剧本 agent，再连接 outline-agent → episode-agent，传递上游输出。",
+    "用户只需单次文本生成时可精简为一个 agent；两级结构是范例，不是强制步骤。",
+    "提示词放在 --prompt，角色和输出格式放在 --system-prompt。模型从 canvas models --task llm 选择。",
+    "搭建连线不等于已生成剧本。网页先运行大纲，完成后检查传入内容，再运行单集节点；不要在 CLI 中预填 output 或 completed。"
+  ],
+  "nodes": [
+    {
+      "id": "outline-agent", "type": "agent", "role": "generation",
+      "purpose": "从用户梗概生成角色设定与分集大纲", "x": 0, "y": 0,
+      "cli_args": ["--prompt", "{{story_brief}}", "--system-prompt", "根据用户梗概输出角色设定、世界观和分集大纲，尊重用户指定题材与格式。", "--model", "{{llm_model}}"]
+    },
+    {
+      "id": "episode-agent", "type": "agent", "role": "generation",
+      "purpose": "根据上游大纲生成指定集数的剧本", "x": 800, "y": 0,
+      "cli_args": ["--prompt", "{{episode_request}}", "--system-prompt", "根据上游大纲输出用户指定集数的剧本，包括场景、人物、动作、对白与镜头建议。", "--model", "{{llm_model}}"]
+    },
+    {"id": "outline-result", "type": "text", "role": "generated-result", "purpose": "大纲的真实文本输出"},
+    {"id": "episode-result", "type": "text", "role": "generated-result", "purpose": "单集剧本的真实文本输出"}
+  ],
+  "connections": [
+    {"fromNode": "outline-agent", "toNode": "episode-agent", "phase": "setup"},
+    {"fromNode": "outline-agent", "toNode": "outline-result", "phase": "generated-result"},
+    {"fromNode": "episode-agent", "toNode": "episode-result", "phase": "generated-result"}
+  ]
+}

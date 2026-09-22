@@ -12,9 +12,14 @@ import { json, text } from "../core/output.js";
 import { handleVCameraCommand, vCameraUsage } from "./v-camera.js";
 import { getVCameraCapabilities } from "../v-camera/contract.js";
 import { handleLocalSceneCommand, LOCAL_SCENE_COMMANDS } from "./v-camera-scene.js";
+import { handleTemplatesCommand } from "./templates.js";
 
 export async function handleCanvasCommand(subcommand = "", args: string[]): Promise<void> {
   const asJson = hasFlag(args, "--json");
+  if (subcommand === "templates") {
+    await handleTemplatesCommand(args);
+    return;
+  }
   if (subcommand === "node" && args[0] === "types") {
     json(nodeCatalog());
     return;
@@ -297,7 +302,7 @@ export async function handleCanvasCommand(subcommand = "", args: string[]): Prom
     return;
   }
 
-  text("Usage: mir-cli canvas <list|create|open|capabilities|models|inspect|upload|node|group|v-camera>");
+  text("Usage: mir-cli canvas <list|create|open|capabilities|models|templates|inspect|upload|node|group|v-camera>");
 }
 
 const MATERIAL_NODE_TYPES = new Set(["image-item", "video-item", "audio", "file", "text"]);

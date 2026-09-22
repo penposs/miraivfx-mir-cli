@@ -40,6 +40,16 @@ Use `--summary` first. Use full JSON inspection only when the user asks to read 
 
 ## Models And Capabilities
 
+Before choosing nodes for a generation workflow, read its offline blueprint:
+
+```powershell
+mir-cli canvas templates list --json
+mir-cli canvas templates list --task video --json
+mir-cli canvas templates show multi-reference-video --json
+```
+
+Tasks are `image`, `video`, `audio`, and `llm`. The four templates describe node roles, directed connections and construction arguments; they do not write a canvas or run generation. See [workflow templates](WORKFLOW_TEMPLATES.md). Current capabilities and model metadata below still control available models and parameters.
+
 ```powershell
 mir-cli canvas capabilities --json
 mir-cli canvas models --task image --json

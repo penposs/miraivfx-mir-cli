@@ -23,6 +23,8 @@ Use `mir-cli` when you want to:
 
 Current public install:
 
+Version 0.6.0 adds four offline workflow blueprints for story scripts, image generation/character views, multi-reference video and music. Agents can inspect the correct node types, input connections and construction commands before building a canvas.
+
 Version 0.5.0 adds Virtual Shoot spatial plan compilation, validation, runtime sampling, screenshots and previs video export. Browser-based previs requires a frontend deployment containing `/v-camera/previs`; updating the CLI alone does not update the website. File-based compilation and validation work offline.
 
 ```powershell
@@ -112,6 +114,16 @@ mir-cli canvas open --canvas-id <canvas_id>
 ```
 
 ## Add And Arrange Nodes
+
+Read the matching built-in workflow before choosing nodes:
+
+```powershell
+mir-cli canvas templates list --json
+mir-cli canvas templates show character-three-view --json
+mir-cli canvas templates show multi-reference-video --json
+```
+
+The other templates are `story-script` and `music-generation`. They explain which nodes to create and how to connect them, with adaptable prompts and references. Generation uses `image`, `seedance2`, `agent`, or `suno`; material/result nodes are different. The blueprints exclude historical results from their setup commands and work without login. See [workflow templates](docs/WORKFLOW_TEMPLATES.md).
 
 Read supported canvas nodes, models, and parameters:
 

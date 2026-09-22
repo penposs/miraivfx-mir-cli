@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "character-three-view",
+  "title": "角色三视图 / 生图基础范本",
+  "task": "image",
+  "intents": ["生图", "文生图", "图生图", "角色三视图", "角色设计", "image generation"],
+  "source": {
+    "repository": "miraivfx-saas",
+    "path": "frontend/public/canvas-templates/character-three-view.json",
+    "sha256": "903f4d2ec9bf725fc8534dab5e44ba5274c55634bd9655efa307432a20fc1603",
+    "adaptation": "保留原始 image → image-item 结构；移除历史媒体、任务、完成状态和过时模型参数；用通用提示词替换原角色内容。"
+  },
+  "guidance": [
+    "image 是 AI 生图节点；image-item 是参考图或生成后图片素材，不会调用生图模型。",
+    "纯文生图只需创建 image 并填写 prompt；不必创建 text、agent 或空白参考图。",
+    "有用户参考图时，复用或上传真实素材，用 image-item → image；这是输入线，与范例里的 image → image-item 结果线方向相反。",
+    "普通生图可替换三视图提示词，不需要把所有需求都限制为三视图。",
+    "先读 canvas models --task image，选择支持所需参考图数量、比例和分辨率的模型；不要照搬历史模型 ID。"
+  ],
+  "nodes": [
+    {
+      "id": "image-generator", "type": "image", "role": "generation",
+      "purpose": "根据角色描述生成正面、侧面、背面三视图",
+      "x": 0, "y": 0,
+      "cli_args": ["--prompt", "{{image_prompt}}", "--model", "{{image_model}}"],
+      "example_prompt": "角色三视图设计表，纯白背景，同一角色、服装和发型，按正面、侧面、背面排列，全身站姿。角色描述：按用户需求填写。"
+    },
+    {
+      "id": "image-result", "type": "image-item", "role": "generated-result",
+      "purpose": "网页真实生成成功后的图片素材；搭建时不要创建假结果"
+    }
+  ],
+  "connections": [
+    {"fromNode": "image-generator", "toNode": "image-result", "phase": "generated-result"}
+  ]
+}

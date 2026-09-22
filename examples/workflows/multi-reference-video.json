@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "multi-reference-video",
+  "title": "多图参考视频 / 视频生成基础范本",
+  "task": "video",
+  "intents": ["视频生成", "多图参考", "多参视频", "图生视频", "文生视频", "video generation"],
+  "source": {
+    "repository": "miraivfx-saas",
+    "path": "frontend/public/canvas-templates/multi-reference-video.json",
+    "sha256": "15116ce0d849f3df1959203e56495a9f32384e09efe6aa22ba42ec8aaeb06420",
+    "adaptation": "按原 assetOrder 保留五个 image-item → seedance2 → video-item；替换角色和媒体，移除旧模型、缓存输入、任务与完成状态。"
+  },
+  "guidance": [
+    "seedance2 是当前统一视频生成节点；seedance 是提示词助手，不能代替生成节点；video-item 是视频素材或输出。",
+    "本范例是五张参考图共同连接到一个 seedance2，不是把参考图串联，也不是每张图各建一个视频生成器。",
+    "先读 canvas models --task video，确认模型支持多图参考以及所需数量、时长、分辨率、比例和媒体种类。不能只因模型名含 video 就假设支持多参。",
+    "参考图数量按用户素材和模型限制调整；纯文生视频可去掉所有参考图，仅保留 seedance2。",
+    "如模型支持视频/音频参考，可用 video-item/audio → seedance2；首尾帧仅适用于支持它的模型及相应模式，不是通用多图参考开关。",
+    "参考顺序沿用下面的 setup 连线顺序。连完后核对网页输入区与提示词中的 @image1 等编号；不同模型的引用语法以其当前能力为准。",
+    "复用用户已有素材节点。新素材用上传返回的真实 URL，不用范例历史 URL；同一素材不要重复上传或重复建节点。",
+    "不要复制原 assetOrder/receivedMedia/receivedImages；这些包含旧节点 ID 和旧媒体 URL。如需调整顺序，使用实际节点和网页输入排序。"
+  ],
+  "nodes": [
+    {"id": "reference-1", "type": "image-item", "role": "reference", "purpose": "参考图 1：按用户指定角色或主体", "x": -760, "y": 0, "cli_args": ["--content", "{{reference_1_url}}"]},
+    {"id": "reference-2", "type": "image-item", "role": "reference", "purpose": "参考图 2：按用户指定角色或主体", "x": -420, "y": 0, "cli_args": ["--content", "{{reference_2_url}}"]},
+    {"id": "reference-3", "type": "image-item", "role": "reference", "purpose": "参考图 3：场景、道具或其他参考", "x": -760, "y": 340, "cli_args": ["--content", "{{reference_3_url}}"]},
+    {"id": "reference-4", "type": "image-item", "role": "reference", "purpose": "参考图 4：场景、道具或其他参考", "x": -420, "y": 340, "cli_args": ["--content", "{{reference_4_url}}"]},
+    {"id": "reference-5", "type": "image-item", "role": "reference", "purpose": "参考图 5：场景、道具或其他参考", "x": -760, "y": 680, "cli_args": ["--content", "{{reference_5_url}}"]},
+    {
+      "id": "video-generator", "type": "seedance2", "role": "generation",
+      "purpose": "统一视频生成，接收全部所需参考素材", "x": 0, "y": 0,
+      "cli_args": ["--prompt", "{{video_prompt}}", "--model", "{{video_model}}", "--ratio", "{{video_ratio}}", "--duration", "{{video_duration}}", "--resolution", "{{video_resolution}}"],
+      "example_prompt": "根据输入区实际编号描述各参考图的用途，再写主体动作、环境、运镜、时间顺序与风格要求。"
+    },
+    {"id": "video-result", "type": "video-item", "role": "generated-result", "purpose": "网页生成成功后的真实视频素材"}
+  ],
+  "connections": [
+    {"fromNode": "reference-1", "toNode": "video-generator", "phase": "setup"},
+    {"fromNode": "reference-2", "toNode": "video-generator", "phase": "setup"},
+    {"fromNode": "reference-3", "toNode": "video-generator", "phase": "setup"},
+    {"fromNode": "reference-4", "toNode": "video-generator", "phase": "setup"},
+    {"fromNode": "reference-5", "toNode": "video-generator", "phase": "setup"},
+    {"fromNode": "video-generator", "toNode": "video-result", "phase": "generated-result"}
+  ]
+}
