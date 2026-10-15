@@ -19,6 +19,19 @@ Use `mir-cli` when you want to:
 - keep complex creative work laid out clearly
 - set Virtual Shoot actors, lightweight poses, props, camera fields, global paths, shots, and camera cuts
 
+## Storyboard prompts and multiple references
+
+Use `seedance2` for the unified **特惠视频生成 seedance minimax** node. Its default model is `seedance2-standard`, matching the website. Choose another available model explicitly with `--model`; a 30-second model is not the default.
+
+Upload each unique local reference once with `canvas upload --allow-upload`, then create an `image-item`, `video-item` or `audio` material node using its returned URL. Reuse those material node IDs across shots:
+
+```powershell
+mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --prompt-file ./shots/01.txt --reference-node <character_id>,<scene_id> --duration 5 --dry-run --json
+mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --prompt-file ./shots/01.txt --reference-node <character_id>,<scene_id> --duration 5 --yes --json
+```
+
+Each creation writes the video node and all incoming reference connections together. `--reference-node` accepts repeated flags or comma-separated IDs, preserves first-occurrence order, and returns the `@image1`/`@video1`/`@audio1` mapping. Prompts are read literally as UTF-8, including line breaks. See [the folder workflow guide](docs/STORYBOARD_WORKFLOWS.md) for asset reuse, model limits and verification.
+
 ## Install
 
 Current public install:

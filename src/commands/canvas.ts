@@ -13,6 +13,7 @@ import { handleVCameraCommand, vCameraUsage } from "./v-camera.js";
 import { getVCameraCapabilities } from "../v-camera/contract.js";
 import { handleLocalSceneCommand, LOCAL_SCENE_COMMANDS } from "./v-camera-scene.js";
 import { handleTemplatesCommand } from "./templates.js";
+import { DEFAULT_VIDEO_MODEL, isDiscountVideoModel, resolveReferenceInputs, validateVideoReferences } from "../canvas/reference-inputs.js";
 
 export async function handleCanvasCommand(subcommand = "", args: string[]): Promise<void> {
   const asJson = hasFlag(args, "--json");
@@ -709,7 +710,10 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
   const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
   const nodeType = requireValue(getFlagValue(args, "--type"), "--type");
   assertCurrentNodeType(nodeType);
-  const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt") ?? "";
+  const content = await readPromptContent(args) ?? "";
+  const referenceIds = parseIdFlags(args, ["--reference-node"]);
+  if (hasFlag(args, "--reference-node") && !referenceIds.length) throw new Error("--reference-node requires at least one material node ID");
+  if (referenceIds.length && nodeType !== "seedance2") throw new Error("--reference-node is supported for seedance2 video nodes");
   const rawTitle = getFlagValue(args, "--title");
   const title = getFlagValue(args, "--node-title") ?? defaultTitleForNode(nodeType);
   const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
@@ -720,7 +724,7 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
     throw new Error("--group-with requires --group-title");
   }
   const shape = defaultShapeForNode(nodeType);
-  const canvas = requestedX === undefined || requestedY === undefined || groupTitle
+  const canvas = requestedX === undefined || requestedY === undefined || groupTitle || referenceIds.length
     ? await getCanvasData(api, canvasId)
     : undefined;
   const position = resolveNodePosition(canvas, nodeType, shape, requestedX, requestedY);
@@ -731,6 +735,9 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
   const status = getFlagValue(args, "--status") ?? defaultStatusForNode(nodeType, content);
   const model = getFlagValue(args, "--model");
   const dataJson = parseSettings(getFlagValue(args, "--data-json")) ?? {};
+  if (referenceIds.length && ["assetOrder", "receivedMedia", "receivedImages"].some(key => key in dataJson)) {
+    throw new Error("--reference-node derives input order from real connections; omit assetOrder/receivedMedia/receivedImages");
+  }
   const nodeData = normalizeNodeDataForType(nodeType, args, content, rawTitle, dataJson);
   if (nodeType === "depth-map") {
     nodeData.depthSettings = { ...DEPTH_DEFAULTS, ...(nodeData.depthSettings as Record<string, unknown> | undefined) };
@@ -746,7 +753,11 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
   }
 
   if (nodeType === "seedance2") {
-    await validateUnifiedVideoData(api, { ...nodeData, ...(model ? { model } : {}) });
+    nodeData.model = model ?? firstString(nodeData.model) ?? DEFAULT_VIDEO_MODEL;
+    const selected = await validateUnifiedVideoData(api, nodeData);
+    if (referenceIds.length || nodeData.use_first_last_frames === true) {
+      validateVideoReferences(resolveReferenceInputs(canvas?.nodes ?? [], referenceIds), nodeData, selected);
+    }
   } else if (model) {
     const modelTask = modelTaskForNode(nodeType);
     if (modelTask) await assertModelAvailable(api, modelTask, model);
@@ -802,12 +813,13 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
         },
       )
     : undefined;
-  const baseRevision = group ? requireCanvasRevision(canvas) : undefined;
+  const baseRevision = group || referenceIds.length ? requireCanvasRevision(canvas) : undefined;
   if (group && canvas) {
     assertCanvasIdsWereAbsent(canvas, { nodeId: node.id, groupId: group.id });
   }
   const ops = [
     { type: "add_node", node },
+    ...referenceIds.map(fromNode => ({ type: "connect", id: randomUUID(), fromNode, toNode: node.id })),
     ...(connection ? [connection] : []),
     ...(group ? [{ type: "add_group", group }] : []),
   ];
@@ -827,6 +839,7 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
       title,
       status,
       connected_to: connectTo ?? null,
+      references: resolveReferenceInputs(canvas?.nodes ?? [], referenceIds),
       group_id: group?.id ?? null,
       members: group?.nodeIds ?? [],
       opened: false,
@@ -838,7 +851,7 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
   try {
     update = await api.postJson<CanvasOpsResponse>(`/canvas/${encodeURIComponent(canvasId)}/ops`, {
       ...(baseRevision !== undefined ? { baseRevision } : {}),
-      conflictPolicy: group ? "strict" : "merge",
+      conflictPolicy: group || referenceIds.length ? "strict" : "merge",
       clientModifiedAt: now,
       ops,
     });
@@ -867,6 +880,7 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
       title,
       status,
       connected_to: connectTo ?? null,
+      references: resolveReferenceInputs(canvas?.nodes ?? [], referenceIds),
       group_id: group.id,
       members: group.nodeIds,
       revision: confirmed.canvas.revision,
@@ -903,6 +917,7 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
     title,
     status,
     connected_to: connectTo ?? null,
+    references: resolveReferenceInputs(canvas?.nodes ?? [], referenceIds),
     group_id: update.data?.group_id ?? group?.id ?? null,
     members: update.data?.members ?? group?.nodeIds ?? [],
     revision: update.data?.revision,
@@ -917,7 +932,7 @@ async function addImageNode(api: ApiClient, args: string[], appBase: string): Pr
   }
   const shouldOpen = hasFlag(args, "--open");
   const canvasId = requireValue(getFlagValue(args, "--canvas-id"), "--canvas-id");
-  const prompt = getFlagValue(args, "--prompt") ?? "";
+  const prompt = await readPromptContent(args) ?? "";
   const model = getFlagValue(args, "--model");
   const title = getFlagValue(args, "--node-title") ?? "AI 生图";
   const requestedX = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
@@ -1061,7 +1076,7 @@ export async function updateCanvasNode(api: ApiClient, args: string[], appBase: 
   const node = findCanvasNode(canvas, nodeId);
   const patch: Record<string, unknown> = {};
   const rawTitle = getFlagValue(args, "--title");
-  const content = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt");
+  const content = await readPromptContent(args);
   const x = parseOptionalNumber(getFlagValue(args, "--x"), "--x");
   const y = parseOptionalNumber(getFlagValue(args, "--y"), "--y");
   const width = parseOptionalNumber(getFlagValue(args, "--width"), "--width");
@@ -1537,14 +1552,12 @@ async function assertModelAvailable(api: ApiClient, task: string, modelId: strin
   return match;
 }
 
-async function validateUnifiedVideoData(api: ApiClient, data: Record<string, unknown>, selectedModel?: string): Promise<void> {
-  const modelId = selectedModel ?? firstString(data.model);
-  // With no explicit model, the web node resolves its current catalog defaults.
-  if (!modelId) return;
+async function validateUnifiedVideoData(api: ApiClient, data: Record<string, unknown>, selectedModel?: string): Promise<Record<string, unknown>> {
+  const modelId = selectedModel ?? firstString(data.model) ?? DEFAULT_VIDEO_MODEL;
   const model = await assertModelAvailable(api, "video", modelId);
   const schema = model.parameter_schema as Record<string, any>;
   const hints = model.ui_hints as Record<string, unknown>;
-  const discount = modelId.startsWith("seedance2-");
+  const discount = isDiscountVideoModel(modelId);
   const subsidy = modelId.startsWith("megaby-video-") || modelId.startsWith("megaby-custom-") || hints?.megaby_video || schema?.x_megaby_video;
   const h3 = modelId.startsWith("runninghub-h3-");
   if (!discount && !subsidy && !h3) throw new Error(`Model ${modelId} is not supported by the unified video node`);
@@ -1556,7 +1569,7 @@ async function validateUnifiedVideoData(api: ApiClient, data: Record<string, unk
     if (data[key] !== undefined && data[key] !== null) throw new Error(`Parameter ${key} is not supported by ${modelId}`);
   }
   const properties = schema?.properties;
-  if (!properties || typeof properties !== "object") return;
+  if (!properties || typeof properties !== "object") return model;
   for (const key of ["size", "resolution", "duration", "generate_audio", "seed"]) {
     const value = data[key];
     if (value === undefined || value === null) continue;
@@ -1570,6 +1583,15 @@ async function validateUnifiedVideoData(api: ApiClient, data: Record<string, unk
       throw new Error(`Invalid ${key} for ${modelId}: outside the model parameter range`);
     }
   }
+  return model;
+}
+
+async function readPromptContent(args: string[]): Promise<string | undefined> {
+  const inline = getFlagValue(args, "--content") ?? getFlagValue(args, "--prompt");
+  if (!hasFlag(args, "--prompt-file")) return inline;
+  if (inline !== undefined) throw new Error("Use either --prompt-file or --prompt/--content, not both");
+  const path = requireValue(getFlagValue(args, "--prompt-file"), "--prompt-file");
+  return (await readFile(path, "utf8")).replace(/^\uFEFF/, "");
 }
 
 function normalizeModels(response: ModelsResponse, task: string): Array<Record<string, unknown>> {

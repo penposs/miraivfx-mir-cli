@@ -1,3 +1,5 @@
+import { DEFAULT_VIDEO_MODEL } from "./reference-inputs.js";
+
 // Reviewed against the web Sidebar, context menu, tool actions and NodeType.
 // Backend safe_canvas_node_types also includes historical serialization types.
 export const NODE_TITLES: Record<string, string> = {
@@ -61,6 +63,15 @@ export function nodeCatalog() {
     sidebar_node_types: SIDEBAR_NODE_TYPES,
     aliases: NODE_ACTION_ALIASES,
     retired_node_types: RETIRED_NODE_TYPES,
+    video_generation: {
+      node_type: "seedance2",
+      default_model: DEFAULT_VIDEO_MODEL,
+      prompt_file_flag: "--prompt-file",
+      reference_node_flag: "--reference-node",
+      reference_node_types: ["image-item", "video-item", "audio"],
+      reference_direction: "material -> new generator",
+      reference_order: "Repeat --reference-node or pass comma-separated IDs; first occurrence wins. Numbering is per media kind.",
+    },
     workflow_templates: {
       list_command: "mir-cli canvas templates list --json",
       show_command: "mir-cli canvas templates show <template-id> --json",
@@ -80,6 +91,7 @@ export function currentCanvasCapabilities(server: Record<string, unknown>) {
     sidebar_node_types: SIDEBAR_NODE_TYPES.filter(type => available.includes(type)),
     cli_node_types: nodeCatalog().node_types.filter(node => available.includes(node.type)),
     retired_node_types: RETIRED_NODE_TYPES,
+    video_generation: nodeCatalog().video_generation,
     workflow_templates: nodeCatalog().workflow_templates,
   };
 }

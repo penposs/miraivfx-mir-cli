@@ -9,7 +9,7 @@ function mockApi(nodes = []) {
     calls,
     async getJson(path) {
       calls.push(path);
-      if (path.includes("/models")) return { data: [{ id: "seedance2-5-standard", model_type: "video", is_active: true }] };
+      if (path.includes("/models")) return { data: ["seedance2-standard", "seedance2-5-standard"].map(id => ({ id, model_type: "video", is_active: true })) };
       return { success: true, data: { id: "canvas-1", project_id: "project-1", revision: 7, nodes, connections: [], groups: [] } };
     },
     async postJson(path, body) {
@@ -25,8 +25,8 @@ async function create(type, args = [], api = mockApi()) {
 }
 
 test("unified video maps current web fields and validates model availability", async () => {
-  const api = mockApi();
-  const node = await create("seedance2", ["--model", "seedance2-5-standard", "--ratio", "9:16", "--duration", "30", "--resolution", "1080p", "--first-last-frames", "--no-audio", "--return-last-frame"], api);
+  const api = mockApi([{ id: "ref", type: "image-item", content: "/uploads/ref.png" }]);
+  const node = await create("seedance2", ["--model", "seedance2-5-standard", "--ratio", "9:16", "--duration", "30", "--resolution", "1080p", "--reference-node", "ref", "--first-last-frames", "--no-audio", "--return-last-frame"], api);
   assert.equal(node.width, 420);
   assert.equal(node.data.model, "seedance2-5-standard");
   assert.equal(node.data.size, "9:16");
@@ -44,7 +44,7 @@ test("unified video keeps model-specific defaults with the web catalog", async (
   assert.equal(node.data.size, "1:1");
   assert.equal(node.data.duration, 10);
   assert.equal(node.data.generate_audio, undefined);
-  assert.equal(node.data.model, undefined);
+  assert.equal(node.data.model, "seedance2-standard");
 });
 
 test("depth settings use nested web fields and reject unsupported options", async () => {

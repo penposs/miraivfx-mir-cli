@@ -31,6 +31,7 @@ Usage:
   mir-cli canvas node add-suno --canvas-id <canvas_id> --song-title "Song title" --style "R&B, soul" --lyrics "[Verse]..." --yes --json
   mir-cli canvas node add-suno --canvas-id <canvas_id> --title "Song title" --style "R&B, soul" --lyrics "[Verse]..." --yes --json
   mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --prompt "Video prompt" --ratio 16:9 --duration 10 --resolution 720p --yes --json
+  mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --prompt-file ./shot-01.txt --reference-node <character_id>,<scene_id> --dry-run --json
   mir-cli canvas node add-seedance2 --canvas-id <canvas_id> --prompt "Video prompt" --model <model_id> --ratio 16:9 --duration 10 --first-last-frames --yes --json
   mir-cli canvas node add-agent --canvas-id <canvas_id> --system-prompt "Role instructions" --yes --json
   mir-cli canvas node add-seedance --canvas-id <canvas_id> --prompt "Shot description" --yes --json
