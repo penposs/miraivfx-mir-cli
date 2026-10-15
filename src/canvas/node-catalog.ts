@@ -1,5 +1,3 @@
-import { DEFAULT_VIDEO_MODEL } from "./reference-inputs.js";
-
 // Reviewed against the web Sidebar, context menu, tool actions and NodeType.
 // Backend safe_canvas_node_types also includes historical serialization types.
 export const NODE_TITLES: Record<string, string> = {
@@ -65,7 +63,7 @@ export function nodeCatalog() {
     retired_node_types: RETIRED_NODE_TYPES,
     video_generation: {
       node_type: "seedance2",
-      default_model: DEFAULT_VIDEO_MODEL,
+      model_selection: "Omit --model to use the web default; specify an available model or change it later on the canvas.",
       prompt_file_flag: "--prompt-file",
       reference_node_flag: "--reference-node",
       reference_node_types: ["image-item", "video-item", "audio"],

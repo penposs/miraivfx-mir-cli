@@ -44,7 +44,7 @@ test("unified video keeps model-specific defaults with the web catalog", async (
   assert.equal(node.data.size, "1:1");
   assert.equal(node.data.duration, 10);
   assert.equal(node.data.generate_audio, undefined);
-  assert.equal(node.data.model, "seedance2-standard");
+  assert.equal(node.data.model, undefined);
 });
 
 test("depth settings use nested web fields and reject unsupported options", async () => {

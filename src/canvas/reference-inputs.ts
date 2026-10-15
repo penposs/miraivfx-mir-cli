@@ -1,5 +1,3 @@
-export const DEFAULT_VIDEO_MODEL = "seedance2-standard";
-
 export function isDiscountVideoModel(id: string): boolean {
   return ["seedance2-", "botcf-", "bsutopia-"].some(prefix => id.startsWith(prefix));
 }
@@ -25,7 +23,14 @@ export function resolveReferenceInputs(nodes: unknown[], ids: string[]): Referen
   });
 }
 
-export function validateVideoReferences(refs: ReferenceInput[], data: Record<string, unknown>, model: Record<string, any>): void {
+export function validateVideoReferences(refs: ReferenceInput[], data: Record<string, unknown>, model?: Record<string, any>): void {
+  const counts = { image: 0, video: 0, audio: 0 };
+  for (const ref of refs) counts[ref.kind] += 1;
+  if (data.use_first_last_frames === true && !(counts.image >= 1 && counts.image <= 2 && !counts.video && !counts.audio)) {
+    throw new Error("First/last-frame mode requires 1–2 images and no video or audio references");
+  }
+  // An omitted model belongs to the web UI; do not guess its current limits.
+  if (!model) return;
   const id = String(model.model_id);
   const discount = isDiscountVideoModel(id);
   const hints = model.ui_hints ?? {};
@@ -33,8 +38,6 @@ export function validateVideoReferences(refs: ReferenceInput[], data: Record<str
     || model.parameter_schema?.x_megaby_video?.media_policy || {};
   // These are the current web adapters' fallbacks; explicit catalog policies take priority.
   const fallback = discount ? [9, 1, 3] : id === "megaby-video-2-5" ? [30, 10, 10] : [9, 3, 3];
-  const counts = { image: 0, video: 0, audio: 0 };
-  for (const ref of refs) counts[ref.kind] += 1;
   for (const [index, kind] of (["image", "video", "audio"] as const).entries()) {
     const raw = policy[`max_${kind === "audio" ? "audios" : `${kind}s`}`];
     const limit = raw !== undefined && Number.isInteger(Number(raw)) && Number(raw) >= 0 ? Number(raw) : fallback[index];
@@ -42,7 +45,4 @@ export function validateVideoReferences(refs: ReferenceInput[], data: Record<str
   }
   const minImages = Number(hints.video_media_policy?.min_images ?? 0);
   if (counts.image < minImages) throw new Error(`Model ${id} requires at least ${minImages} image references`);
-  if (data.use_first_last_frames === true && !(counts.image >= 1 && counts.image <= 2 && !counts.video && !counts.audio)) {
-    throw new Error("First/last-frame mode requires 1–2 images and no video or audio references");
-  }
 }

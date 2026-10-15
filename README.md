@@ -21,7 +21,7 @@ Use `mir-cli` when you want to:
 
 ## Storyboard prompts and multiple references
 
-Use `seedance2` for the unified **特惠视频生成 seedance minimax** node. Its default model is `seedance2-standard`, matching the website. Choose another available model explicitly with `--model`; a 30-second model is not the default.
+Use `seedance2` for the unified **特惠视频生成 seedance minimax** node. Omit `--model` to leave model selection to the canvas default. Users can specify an available model with `--model` or change it later on the canvas.
 
 Upload each unique local reference once with `canvas upload --allow-upload`, then create an `image-item`, `video-item` or `audio` material node using its returned URL. Reuse those material node IDs across shots:
 

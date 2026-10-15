@@ -46,7 +46,7 @@ test("two shots reuse materials and wire ordered inputs in one revision-checked 
     assert.equal(request.body.conflictPolicy, "strict");
     assert.deepEqual(request.body.ops.slice(1).map(op => [op.fromNode, op.toNode]), [["sound", result.node_id], ["scene", result.node_id], ["person", result.node_id]]);
     assert.deepEqual(result.references.map(r => r.label), ["@audio1", "@image1", "@image2"]);
-    assert.equal(api.state.nodes.find(n => n.id === result.node_id).data.model, "seedance2-standard");
+    assert.equal(Object.hasOwn(api.state.nodes.find(n => n.id === result.node_id).data, "model"), false);
     assert.equal(result.generation_started, false);
   }
 });
@@ -71,7 +71,7 @@ test("missing, local-only, wrong-type and excessive references fail before mutat
   }
   const api = mockApi();
   for (let i = 0; i < 10; i++) api.state.nodes.push({ id: `img${i}`, type: "image-item", content: `/uploads/${i}.png` });
-  await assert.rejects(add(api, ["--reference-node", Array.from({ length: 10 }, (_, i) => `img${i}`).join(","), "--yes"]), /at most 9/);
+  await assert.rejects(add(api, ["--model", "seedance2-standard", "--reference-node", Array.from({ length: 10 }, (_, i) => `img${i}`).join(","), "--yes"]), /at most 9/);
   await assert.rejects(add(api, ["--reference-node", "person,sound", "--first-last-frames", "--yes"]), /First\/last-frame/);
   assert.equal(api.writes.length, 0);
 });
@@ -86,10 +86,20 @@ test("current provider families and catalog media policies are honored", async (
   assert.equal(api.writes.length, 0);
 });
 
-test("implicit default model is checked instead of silently accepting invalid duration", async () => {
+test("omitted model stays unset without a catalog request; explicit models are validated", async () => {
   const api = mockApi();
-  await assert.rejects(add(api, ["--duration", "30", "--yes"]), /Invalid duration/);
-  await assert.rejects(add(mockApi({ id: "other" }), ["--yes"]), /not available/);
+  const originalGet = api.getJson;
+  api.getJson = async path => {
+    assert.equal(path.includes("/models"), false);
+    return originalGet(path);
+  };
+  const preview = await add(api, ["--duration", "30", "--reference-node", "person,scene", "--dry-run"]);
+  assert.equal(Object.hasOwn(preview.ops[0].node.data, "model"), false);
+  api.getJson = originalGet;
+  await assert.rejects(add(api, ["--model", "seedance2-standard", "--duration", "30", "--yes"]), /Invalid duration/);
+  await assert.rejects(add(mockApi({ id: "other" }), ["--model", "seedance2-standard", "--yes"]), /not available/);
+  const explicit = await add(api, ["--model", "seedance2-standard", "--dry-run"]);
+  assert.equal(explicit.ops[0].node.data.model, "seedance2-standard");
   assert.equal(api.writes.length, 0);
 });
 

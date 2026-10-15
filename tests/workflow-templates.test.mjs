@@ -96,7 +96,7 @@ test("every blueprint's creation recipe works through the real CLI node builder 
     if (id === "multi-reference-video") {
       assert.equal(generator.data.duration, 10);
       assert.equal(generator.data.size, "16:9");
-      assert.equal(generator.data.model, values.video_model);
+      assert.equal(Object.hasOwn(generator.data, "model"), false);
     }
     if (id === "music-generation") {
       assert.equal(generator.data.sunoLyrics, values.lyrics);
@@ -104,7 +104,7 @@ test("every blueprint's creation recipe works through the real CLI node builder 
       assert.equal(generator.data.sunoMode, "custom");
     }
   }
-  assert.ok(calls.some(path => path.endsWith("task=video")));
+  assert.equal(calls.some(path => path.endsWith("task=video")), false);
 });
 
 test("template guards catch wrong generators, reversed input edges and fake output setup", async () => {

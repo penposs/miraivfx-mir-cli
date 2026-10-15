@@ -12,6 +12,7 @@
   },
   "guidance": [
     "seedance2 是当前统一视频生成节点；seedance 是提示词助手，不能代替生成节点；video-item 是视频素材或输出。",
+    "默认不传 --model，由画布选择默认模型；用户明确指定时再加 --model，也可以之后在画布中手动调整。",
     "本范例是五张参考图共同连接到一个 seedance2，不是把参考图串联，也不是每张图各建一个视频生成器。",
     "先读 canvas models --task video，确认模型支持多图参考以及所需数量、时长、分辨率、比例和媒体种类。不能只因模型名含 video 就假设支持多参。",
     "参考图数量按用户素材和模型限制调整；纯文生视频可去掉所有参考图，仅保留 seedance2。",
@@ -29,7 +30,7 @@
     {
       "id": "video-generator", "type": "seedance2", "role": "generation",
       "purpose": "统一视频生成，接收全部所需参考素材", "x": 0, "y": 0,
-      "cli_args": ["--prompt", "{{video_prompt}}", "--model", "{{video_model}}", "--ratio", "{{video_ratio}}", "--duration", "{{video_duration}}", "--resolution", "{{video_resolution}}"],
+      "cli_args": ["--prompt", "{{video_prompt}}", "--ratio", "{{video_ratio}}", "--duration", "{{video_duration}}", "--resolution", "{{video_resolution}}"],
       "example_prompt": "根据输入区实际编号描述各参考图的用途，再写主体动作、环境、运镜、时间顺序与风格要求。"
     },
     {"id": "video-result", "type": "video-item", "role": "generated-result", "purpose": "网页生成成功后的真实视频素材"}

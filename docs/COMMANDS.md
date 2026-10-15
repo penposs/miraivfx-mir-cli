@@ -446,4 +446,4 @@ These broad commands are intentionally web-only. Users review the Miraivfx canva
 
 ## Storyboard file inputs
 
-`canvas node add-seedance2 --prompt-file <UTF-8 file> --reference-node <material_id>[,<material_id>...] --canvas-id <id> --dry-run --json` previews a generator and its ordered input connections. Repeat `--reference-node` as needed; use `--yes` to apply. The default model is `seedance2-standard` and is checked against the live catalog, including when omitted. See [STORYBOARD_WORKFLOWS.md](STORYBOARD_WORKFLOWS.md).
+`canvas node add-seedance2 --prompt-file <UTF-8 file> --reference-node <material_id>[,<material_id>...] --canvas-id <id> --dry-run --json` previews a generator and its ordered input connections. Repeat `--reference-node` as needed; use `--yes` to apply. Omit `--model` to use the canvas default, or specify one to validate its public parameters and reference limits. Users can also select a model on the canvas. See [STORYBOARD_WORKFLOWS.md](STORYBOARD_WORKFLOWS.md).

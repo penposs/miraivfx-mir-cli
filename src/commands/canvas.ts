@@ -13,7 +13,7 @@ import { handleVCameraCommand, vCameraUsage } from "./v-camera.js";
 import { getVCameraCapabilities } from "../v-camera/contract.js";
 import { handleLocalSceneCommand, LOCAL_SCENE_COMMANDS } from "./v-camera-scene.js";
 import { handleTemplatesCommand } from "./templates.js";
-import { DEFAULT_VIDEO_MODEL, isDiscountVideoModel, resolveReferenceInputs, validateVideoReferences } from "../canvas/reference-inputs.js";
+import { isDiscountVideoModel, resolveReferenceInputs, validateVideoReferences } from "../canvas/reference-inputs.js";
 
 export async function handleCanvasCommand(subcommand = "", args: string[]): Promise<void> {
   const asJson = hasFlag(args, "--json");
@@ -753,8 +753,7 @@ export async function addGenericNode(api: ApiClient, args: string[], appBase: st
   }
 
   if (nodeType === "seedance2") {
-    nodeData.model = model ?? firstString(nodeData.model) ?? DEFAULT_VIDEO_MODEL;
-    const selected = await validateUnifiedVideoData(api, nodeData);
+    const selected = await validateUnifiedVideoData(api, { ...nodeData, ...(model ? { model } : {}) });
     if (referenceIds.length || nodeData.use_first_last_frames === true) {
       validateVideoReferences(resolveReferenceInputs(canvas?.nodes ?? [], referenceIds), nodeData, selected);
     }
@@ -1552,8 +1551,9 @@ async function assertModelAvailable(api: ApiClient, task: string, modelId: strin
   return match;
 }
 
-async function validateUnifiedVideoData(api: ApiClient, data: Record<string, unknown>, selectedModel?: string): Promise<Record<string, unknown>> {
-  const modelId = selectedModel ?? firstString(data.model) ?? DEFAULT_VIDEO_MODEL;
+async function validateUnifiedVideoData(api: ApiClient, data: Record<string, unknown>, selectedModel?: string): Promise<Record<string, unknown> | undefined> {
+  const modelId = selectedModel ?? firstString(data.model);
+  if (!modelId) return;
   const model = await assertModelAvailable(api, "video", modelId);
   const schema = model.parameter_schema as Record<string, any>;
   const hints = model.ui_hints as Record<string, unknown>;
