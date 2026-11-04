@@ -1,6 +1,8 @@
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, open, readFile, rename, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { assertPrivateFileTarget, privateDirectory, privatePermissions } from "./private-file.js";
 
 export interface AuthSession {
   accessToken: string;
@@ -19,23 +21,37 @@ export async function loadSession(): Promise<AuthSession | null> {
     };
   }
   try {
-    const raw = await readFile(sessionPath(), "utf8");
+    const target = sessionPath();
+    await lstat(target);
+    await assertPrivateFileTarget(target);
+    await privateDirectory(dirname(target));
+    await privatePermissions(target);
+    const raw = await readFile(target, "utf8");
     const session = JSON.parse(raw) as AuthSession;
     if (!session.accessToken && !session.idToken) return null;
     return session;
-  } catch {
-    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError) return null;
+    throw error;
   }
 }
 
 export async function saveSession(session: AuthSession): Promise<void> {
   const target = sessionPath();
-  await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, `${JSON.stringify(session, null, 2)}\n`, "utf8");
+  await assertPrivateFileTarget(target);
+  await privateDirectory(dirname(target));
+  const temporary = join(dirname(target), `.session-${randomUUID()}.tmp`);
+  const handle = await open(temporary, "wx", 0o600);
   try {
-    await chmod(target, 0o600);
-  } catch {
-    // Best effort on Windows.
+    // Permissions are in place before a single credential byte is written.
+    await privatePermissions(temporary);
+    await handle.writeFile(`${JSON.stringify(session, null, 2)}\n`, "utf8");
+    await handle.sync();
+    await handle.close();
+    await rename(temporary, target);
+  } finally {
+    await handle.close();
+    await rm(temporary, { force: true });
   }
 }
 
